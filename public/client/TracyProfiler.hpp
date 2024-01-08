@@ -804,7 +804,7 @@ public:
         return AllocSourceLocation( line, source, sourceSz, function, functionSz, nullptr, 0, color );
     }
 
-    static tracy_force_inline uint64_t AllocSourceLocation( uint32_t line, const char* source, size_t sourceSz, const char* function, size_t functionSz, const char* name, size_t nameSz, uint32_t color = 0 )
+    static tracy_force_inline uint64_t AllocSourceLocation( uint32_t line, const char* source, size_t sourceSz, const char* function, size_t functionSz, const char* name, size_t nameSz, uint32_t color )
     {
         const auto sz32 = uint32_t( 2 + 4 + 4 + functionSz + 1 + sourceSz + 1 + nameSz );
         assert( sz32 <= (std::numeric_limits<uint16_t>::max)() );
