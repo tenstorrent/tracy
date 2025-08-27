@@ -60,7 +60,6 @@ struct MarkerDetails {
 
 const MarkerDetails UnidentifiedMarkerDetails = MarkerDetails("", "", 0);
 
-// put all data in this struct
 struct TTDeviceMarker {
     static constexpr uint64_t RISC_BIT_COUNT = 3;
     static constexpr uint64_t CORE_X_BIT_COUNT = 4;
@@ -83,7 +82,7 @@ struct TTDeviceMarker {
     uint64_t core_x;
     uint64_t core_y;
     uint64_t risc;
-    uint64_t marker_id;  // rename to marker_id and make it 16 bits
+    uint64_t marker_id;
     uint64_t timestamp;
     uint64_t data;
     std::string op_name;
