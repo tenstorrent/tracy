@@ -173,7 +173,7 @@ namespace tracy {
                 !marker.marker_name_keyword_flags[static_cast<uint16_t>(MarkerDetails::MarkerNameKeyword::ERISC_FW)]) {
                 return "";
             }
-            const std::string id_string = marker.risc == 6 ? "TRACE ID:" : "OP ID:";
+            const std::string id_string = marker.risc == RiscType::CORE_AGG ? "TRACE ID:" : "OP ID:";
             return marker.runtime_host_id > 0 ? id_string + std::to_string(marker.runtime_host_id) : "";
         }
 
@@ -192,7 +192,7 @@ namespace tracy {
             const tracy::Color::ColorType color =
                 (marker.marker_name_keyword_flags[static_cast<uint16_t>(MarkerDetails::MarkerNameKeyword::PROFILER)])
                     ? tracy::Color::Tomato3
-                    : colors[marker.risc % colors.size()];
+                    : colors[static_cast<uint8_t>(marker.risc) % colors.size()];
 
             const auto srcloc = Profiler::AllocSourceLocation(
                 marker.line,

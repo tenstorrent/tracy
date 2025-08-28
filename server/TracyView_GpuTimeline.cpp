@@ -11,6 +11,19 @@ namespace tracy
 
 constexpr float MinVisSize = 3;
 
+std::string GetRiscName(RiscType risc) {
+    switch (risc) {
+        case RiscType::BRISC: return "BRISC";
+        case RiscType::NCRISC: return "NCRISC";
+        case RiscType::TRISC_0: return "TRISC_0";
+        case RiscType::TRISC_1: return "TRISC_1";
+        case RiscType::TRISC_2: return "TRISC_2";
+        case RiscType::ERISC: return "ERISC";
+        case RiscType::CORE_AGG: return "CORE_AGG";
+        default: return "UNKNOWN";
+    }
+}
+
 bool View::DrawGpu( const TimelineContext& ctx, const GpuCtxData& gpu, int& offset )
 {
     const auto w = ctx.w;
@@ -46,8 +59,8 @@ bool View::DrawGpu( const TimelineContext& ctx, const GpuCtxData& gpu, int& offs
     for( auto& tn :  tds)
     {
         auto & td = gpu.threadData.at(tn);
-        TTDeviceMarker event = TTDeviceMarker (tn);
-        snprintf(buf, threadNameSize, "%s", riscName[event.risc].c_str());
+        TTDeviceMarker marker = TTDeviceMarker (tn);
+        snprintf(buf, threadNameSize, "%s", GetRiscName(marker.risc).c_str());
         auto& tl = td.timeline;
         assert( !tl.empty() );
         if( tl.is_magic() )

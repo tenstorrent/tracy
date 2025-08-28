@@ -2,9 +2,10 @@
 #define __TRACYTTDEVICEDATA_HPP__
 
 namespace tracy {
-inline std::string riscName[] = {"BRISC", "NCRISC", "TRISC_0", "TRISC_1", "TRISC_2", "ERISC", "CORE_AGG"};
 
-enum class TTDeviceMarkerType : uint8_t { START, END, TOTAL, TS_DATA, TS_EVENT };
+enum class RiscType : uint8_t { BRISC, NCRISC, TRISC_0, TRISC_1, TRISC_2, ERISC, CORE_AGG };
+
+enum class TTDeviceMarkerType : uint8_t { ZONE_START, ZONE_END, ZONE_TOTAL, TS_DATA, TS_EVENT };
 
 struct MarkerDetails {
     enum class MarkerNameKeyword : uint16_t {
@@ -81,8 +82,8 @@ struct TTDeviceMarker {
     uint64_t chip_id;
     uint64_t core_x;
     uint64_t core_y;
-    uint64_t risc;
-    uint64_t marker_id;
+    RiscType risc;
+    uint16_t marker_id;
     uint64_t timestamp;
     uint64_t data;
     std::string op_name;
@@ -98,7 +99,7 @@ struct TTDeviceMarker {
         chip_id(INVALID_NUM),
         core_x(INVALID_NUM),
         core_y(INVALID_NUM),
-        risc(INVALID_NUM),
+        risc(RiscType::BRISC),
         marker_id(INVALID_NUM),
         timestamp(INVALID_NUM),
         data(INVALID_NUM),
@@ -106,7 +107,7 @@ struct TTDeviceMarker {
         line(INVALID_NUM),
         file(""),
         marker_name(""),
-        marker_type(TTDeviceMarkerType::START),
+        marker_type(TTDeviceMarkerType::ZONE_START),
         marker_name_keyword_flags(std::array<bool, static_cast<uint16_t>(MarkerDetails::MarkerNameKeyword::COUNT)>()),
         meta_data(nlohmann::json::object()) {}
 
@@ -115,8 +116,8 @@ struct TTDeviceMarker {
         uint64_t chip_id,
         uint64_t core_x,
         uint64_t core_y,
-        uint64_t risc,
-        uint64_t marker_id,
+        RiscType risc,
+        uint16_t marker_id,
         uint64_t timestamp,
         uint64_t data,
         const std::string& op_name,
@@ -143,7 +144,7 @@ struct TTDeviceMarker {
         meta_data(meta_data) {}
 
     TTDeviceMarker(uint64_t threadID) : runtime_host_id(-1), marker_id(-1) {
-        risc = (threadID) & ((1 << RISC_BIT_COUNT) - 1);
+        risc = static_cast<RiscType>((threadID) & ((1 << RISC_BIT_COUNT) - 1));
         core_x = (threadID >> CORE_X_BIT_SHIFT) & ((1 << CORE_X_BIT_COUNT) - 1);
         core_y = (threadID >> CORE_Y_BIT_SHIFT) & ((1 << CORE_Y_BIT_COUNT) - 1);
         chip_id = (threadID >> CHIP_BIT_SHIFT) & ((1 << CHIP_BIT_COUNT) - 1);
@@ -174,7 +175,8 @@ struct TTDeviceMarker {
     }
 
     uint64_t get_thread_id() const {
-        uint64_t threadID = risc | core_x << CORE_X_BIT_SHIFT | core_y << CORE_Y_BIT_SHIFT | chip_id << CHIP_BIT_SHIFT;
+        uint64_t threadID = static_cast<uint8_t>(risc) | core_x << CORE_X_BIT_SHIFT | core_y << CORE_Y_BIT_SHIFT |
+                            chip_id << CHIP_BIT_SHIFT;
 
         return threadID;
     }
@@ -192,7 +194,8 @@ struct hash<tracy::TTDeviceMarker> {
         hash_value ^= hasher(obj.chip_id) + hash_combine_prime + (hash_value << 6) + (hash_value >> 2);
         hash_value ^= hasher(obj.core_x) + hash_combine_prime + (hash_value << 6) + (hash_value >> 2);
         hash_value ^= hasher(obj.core_y) + hash_combine_prime + (hash_value << 6) + (hash_value >> 2);
-        hash_value ^= hasher(obj.risc) + hash_combine_prime + (hash_value << 6) + (hash_value >> 2);
+        hash_value ^=
+            hasher(static_cast<uint8_t>(obj.risc)) + hash_combine_prime + (hash_value << 6) + (hash_value >> 2);
         hash_value ^= hasher(obj.marker_id) + hash_combine_prime + (hash_value << 6) + (hash_value >> 2);
         return hash_value;
     }
