@@ -75,7 +75,7 @@ namespace tracy {
 
     struct EventInfo
     {
-        TTDeviceEvent event;
+        TTDeviceMarker event;
         EventPhase phase;
     };
 
@@ -166,56 +166,75 @@ namespace tracy {
             return m_query[id];
         }
 
-        void PushStartZone(
-            const TTDeviceEvent& event) {
-            const auto queryId = this->NextQueryId(EventInfo{event, EventPhase::Begin});
+        std::string getRunIdString(const TTDeviceMarker& marker) {
+            // TODO(MO) Until #14847 avoid attaching opID as the zone function name except for B and E FW
+            // This is to avoid generating 5 to 10 times more source locations which is capped at 32K
+            if (!marker.marker_name_keyword_flags[static_cast<uint16_t>(MarkerDetails::MarkerNameKeyword::BRISC_FW)] &&
+                !marker.marker_name_keyword_flags[static_cast<uint16_t>(MarkerDetails::MarkerNameKeyword::ERISC_FW)]) {
+                return "";
+            }
+            const std::string id_string = marker.risc == RiscType::CORE_AGG ? "TRACE ID:" : "OP ID:";
+            return marker.runtime_host_id > 0 ? id_string + std::to_string(marker.runtime_host_id) : "";
+        }
 
-            const std::string id_string = event.risc == 6 ? "TRACE ID:" : "OP ID:";
+        void PushStartMarker(const TTDeviceMarker& marker) {
+            const auto queryId = this->NextQueryId(EventInfo{marker, EventPhase::Begin});
+            const std::string run_id_string = this->getRunIdString(marker);
 
-            const std::string run_id_string = event.run_num > 0 ? id_string + std::to_string(event.run_num) : "";
+            constexpr std::array<tracy::Color::ColorType, 7> colors = {
+                tracy::Color::Orange2,
+                tracy::Color::SeaGreen3,
+                tracy::Color::SkyBlue3,
+                tracy::Color::Turquoise2,
+                tracy::Color::CadetBlue1,
+                tracy::Color::Yellow3,
+                tracy::Color::DarkSlateGray3};
+            const tracy::Color::ColorType color =
+                (marker.marker_name_keyword_flags[static_cast<uint16_t>(MarkerDetails::MarkerNameKeyword::PROFILER)])
+                    ? tracy::Color::Tomato3
+                    : colors[static_cast<uint8_t>(marker.risc) % colors.size()];
 
             const auto srcloc = Profiler::AllocSourceLocation(
-                event.line,
-                event.file.c_str(),
-                event.file.length(),
+                marker.line,
+                marker.file.c_str(),
+                marker.file.length(),
                 run_id_string.c_str(),
                 run_id_string.length(),
-                event.zone_name.c_str(),
-                event.zone_name.length(),
-                event.color);
+                marker.marker_name.c_str(),
+                marker.marker_name.length(),
+                color);
 
             auto zoneBegin = Profiler::QueueSerial();
             MemWrite(&zoneBegin->hdr.type, QueueType::GpuZoneBeginAllocSrcLocSerial);
             MemWrite(&zoneBegin->gpuZoneBegin.cpuTime, Profiler::GetTime());
             MemWrite(&zoneBegin->gpuZoneBegin.srcloc, srcloc);
-            MemWrite(&zoneBegin->gpuZoneBegin.thread, (uint32_t)event.get_thread_id());
+            MemWrite(&zoneBegin->gpuZoneBegin.thread, (uint32_t)marker.get_thread_id());
             MemWrite(&zoneBegin->gpuZoneBegin.queryId, (uint16_t)queryId);
             MemWrite(&zoneBegin->gpuZoneBegin.context, this->GetId());
             Profiler::QueueSerialFinish();
 
             auto zoneTime = Profiler::QueueSerial();
             MemWrite(&zoneTime->hdr.type, QueueType::GpuTime);
-            MemWrite(&zoneTime->gpuTime.gpuTime, (uint64_t)round((double)event.timestamp / m_frequency));
+            MemWrite(&zoneTime->gpuTime.gpuTime, (uint64_t)round((double)marker.timestamp / m_frequency));
             MemWrite(&zoneTime->gpuTime.queryId, (uint16_t)queryId);
             MemWrite(&zoneTime->gpuTime.context, this->GetId());
             Profiler::QueueSerialFinish();
         }
 
-        void PushEndZone(
-            const TTDeviceEvent& event) {
-            const auto queryId = this->NextQueryId(EventInfo{event, EventPhase::End});
+        void PushEndMarker(const TTDeviceMarker& marker) {
+            const auto queryId = this->NextQueryId(EventInfo{marker, EventPhase::End});
 
             auto zoneEnd = Profiler::QueueSerial();
             MemWrite(&zoneEnd->hdr.type, QueueType::GpuZoneEndSerial);
             MemWrite(&zoneEnd->gpuZoneEnd.cpuTime, Profiler::GetTime());
-            MemWrite(&zoneEnd->gpuZoneEnd.thread, (uint32_t)event.get_thread_id());
+            MemWrite(&zoneEnd->gpuZoneEnd.thread, (uint32_t)marker.get_thread_id());
             MemWrite(&zoneEnd->gpuZoneEnd.queryId, (uint16_t)queryId);
             MemWrite(&zoneEnd->gpuZoneEnd.context, this->GetId());
             Profiler::QueueSerialFinish();
 
             auto zoneTime = Profiler::QueueSerial();
             MemWrite(&zoneTime->hdr.type, QueueType::GpuTime);
-            MemWrite(&zoneTime->gpuTime.gpuTime, (uint64_t)round((double)event.timestamp / m_frequency));
+            MemWrite(&zoneTime->gpuTime.gpuTime, (uint64_t)round((double)marker.timestamp / m_frequency));
             MemWrite(&zoneTime->gpuTime.queryId, (uint16_t)queryId);
             MemWrite(&zoneTime->gpuTime.context, this->GetId());
             Profiler::QueueSerialFinish();
@@ -257,8 +276,8 @@ using TracyTTCtx = tracy::TTCtx*;
 #define TracyTTContextName(ctx, name, size) ctx->Name(name, size)
 #define TracyTTContextPopulate(ctx, cpuTime, timeshift, frequency) ctx->PopulateTTContext(cpuTime, timeshift, frequency)
 #define TracyTTContextCalibrate(ctx, cpuTime, timeshift, frequency) ctx->CalibrateTTContext(cpuTime, timeshift, frequency)
-#define TracyTTPushStartZone(ctx, event) ctx->PushStartZone(event)
-#define TracyTTPushEndZone(ctx, event) ctx->PushEndZone(event)
+#define TracyTTPushStartMarker(ctx, marker) ctx->PushStartMarker(marker)
+#define TracyTTPushEndMarker(ctx, marker) ctx->PushEndMarker(marker)
 
 #define TracyGetTimerMul() tracy::get_tracy_timer_mul()
 #define TracyGetBaseTime() tracy::get_tracy_base_time()
