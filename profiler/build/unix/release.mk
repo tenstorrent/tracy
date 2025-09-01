@@ -1,4 +1,4 @@
-CFLAGS := -O3
+CFLAGS := -O1 -march=znver2
 ifndef TRACY_NO_LTO
 CFLAGS += -flto
 endif
