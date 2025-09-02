@@ -90,7 +90,7 @@
       var spinnerElement = document.getElementById('spinner');
       var preloadElement = document.getElementById('preload');
       
-      const TRACE_FILENAME = 'newfile.tracy';
+      const TRACE_FILENAME = 'embed.tracy';
       var Module = {
         preRun: [function() {
           // Fetch and write the trace file before main() runs
@@ -170,5 +170,20 @@
       };
     </script>
     <script async type="text/javascript" src="tracy-profiler.js"></script>
+      <script>
+        // WebSocket auto-reload for embed.tracy changes
+        (function() {
+          var ws = new WebSocket('ws://' + location.hostname + ':8081');
+          ws.onmessage = function(event) {
+            if (event.data === 'reload') {
+              location.reload();
+            }
+          };
+          ws.onclose = function() {
+            // Try to reconnect after 2 seconds
+            setTimeout(function() { location.reload(); }, 2000);
+          };
+        })();
+      </script>
   </body>
 </html>
