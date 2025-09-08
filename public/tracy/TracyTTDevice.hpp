@@ -20,7 +20,7 @@ namespace tracy
     class TTCtxScope {};
 }
 
-using TracyTTCtx = void*;
+using TracyTTCtx = void;
 
 #else
 
@@ -84,24 +84,19 @@ namespace tracy {
     public:
         enum { QueryCount = 64 * 1024 };
 
-        TTCtx()
-            : m_contextId(GetGpuCtxCounter().fetch_add(1, std::memory_order_relaxed))
-            , m_head(0)
-            , m_tail(0)
-        {
-            ZoneScopedC(Color::Red4);
-        }
+        TTCtx() : m_contextId(GetGpuCtxCounter().fetch_add(1, std::memory_order_relaxed)), m_head(0), m_tail(0) {}
 
-        void PopulateTTContext(int64_t tcpu, double tgpu, double frequency)
-        {
+        void PopulateTTContext(int64_t tcpu, double tgpu, double frequency) {
             m_frequency = frequency;
             m_tgpu = tgpu;
-            if (tcpu == 0) tcpu = m_tcpu;
+            if (tcpu == 0) {
+                tcpu = m_tcpu;
+            }
 
             auto item = Profiler::QueueSerial();
             MemWrite(&item->hdr.type, QueueType::GpuNewContext);
             MemWrite(&item->gpuNewContext.cpuTime, tcpu);
-            MemWrite(&item->gpuNewContext.gpuTime, (int64_t)round((double)m_tgpu/m_frequency));
+            MemWrite(&item->gpuNewContext.gpuTime, (int64_t)round((double)m_tgpu / m_frequency));
             memset(&item->gpuNewContext.thread, 0, sizeof(item->gpuNewContext.thread));
             MemWrite(&item->gpuNewContext.period, (float)1.0f);
             MemWrite(&item->gpuNewContext.type, GpuContextType::tt_device);
@@ -269,7 +264,7 @@ namespace tracy {
 
 }  // namespace tracy
 
-using TracyTTCtx = tracy::TTCtx*;
+using TracyTTCtx = tracy::TTCtx;
 
 #define TracyTTContext() tracy::CreateTTContext()
 #define TracyTTDestroy(ctx) tracy::DestroyTTContext(ctx)
