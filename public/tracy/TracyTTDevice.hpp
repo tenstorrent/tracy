@@ -20,7 +20,7 @@ namespace tracy
     class TTCtxScope {};
 }
 
-using TracyTTCtx = void;
+using TracyTTCtx = void*;
 
 #else
 
@@ -264,7 +264,7 @@ namespace tracy {
 
 }  // namespace tracy
 
-using TracyTTCtx = tracy::TTCtx;
+using TracyTTCtx = tracy::TTCtx*;
 
 #define TracyTTContext() tracy::CreateTTContext()
 #define TracyTTDestroy(ctx) tracy::DestroyTTContext(ctx)
