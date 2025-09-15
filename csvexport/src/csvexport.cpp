@@ -352,7 +352,6 @@ int main(int argc, char** argv)
         std::string header = join(columns, args.separator);
         printf("%s\n", header.data());
 
-        const auto last_time = worker.GetLastTime();
         for (auto& it : gpu_slz_selected)
         {
             std::vector<std::string> values( columns.size() );

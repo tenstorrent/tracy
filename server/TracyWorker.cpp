@@ -6974,7 +6974,6 @@ void Worker::ProcessThreadWakeup( const QueueThreadWakeup& ev )
         // So instead of dropping the information, keep the last one around so that we
         // may fetch it once the thread actually switches out.
         // We rely on the fact we won't get another one in the meantime.
-        auto& item = data.back();
         it->second->pendingWakeUp.time = time;
         it->second->pendingWakeUp.cpu = ev.cpu;
         return;
@@ -8692,7 +8691,7 @@ void Worker::CacheSourceFromFile( const char* fn )
     const auto sz = ftell( f );
     fseek( f, 0, SEEK_SET );
     auto src = (char*)m_slab.AllocBig( sz );
-    auto ret = fread( src, 1, sz, f );
+    fread( src, 1, sz, f );
     fclose( f );
     m_data.sourceFileCache.emplace( fn, MemoryBlock{ src, uint32_t( sz ) } );
 }
