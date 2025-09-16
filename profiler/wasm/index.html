@@ -93,22 +93,35 @@
       const TRACE_FILENAME = 'embed.tracy';
       var Module = {
         preRun: [function() {
-          // Fetch and write the trace file before main() runs
-          var done = false;
-          fetch(TRACE_FILENAME)
-            .then(response => response.arrayBuffer())
-            .then(buffer => {
-              const byteArray = new Uint8Array(buffer);
-              FS.writeFile('/' + TRACE_FILENAME, byteArray);
-              done = true;
-            })
-            .catch(err => {
-              console.error('Failed to fetch ' + TRACE_FILENAME + ':', err);
-              done = true;
-            });
-          // Wait for fetch/write to complete before continuing
-          var start = Date.now();
-          while (!done && Date.now() - start < 5000) {} // Wait max 5s
+            // Synchronously fetch and write the trace file before main() runs
+            var fetchFailed = false;
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', TRACE_FILENAME + '?t=' + Date.now(), false); // synchronous
+            // Do NOT set xhr.responseType for sync requests!
+            xhr.overrideMimeType('text/plain; charset=x-user-defined');
+            xhr.onload = function() {
+              if (xhr.status === 200) {
+                // Convert the string response to a Uint8Array
+                var s = xhr.responseText;
+                var byteArray = new Uint8Array(s.length);
+                for (var i = 0; i < s.length; i++) {
+                  byteArray[i] = s.charCodeAt(i) & 0xff;
+                }
+                try { FS.unlink('/' + TRACE_FILENAME); } catch (e) {}
+                FS.writeFile('/' + TRACE_FILENAME, byteArray);
+                console.log('embed.tracy written to Emscripten FS, size:', byteArray.length);
+              } else {
+                fetchFailed = true;
+              }
+            };
+            xhr.onerror = function() {
+              fetchFailed = true;
+            };
+            xhr.send();
+            if (fetchFailed) {
+              alert('Trace file not found or failed to load. Please generate or upload embed.tracy.');
+              throw new Error('embed.tracy not found');
+            }
         }],
         postRun: [],  
         arguments: [TRACE_FILENAME],
