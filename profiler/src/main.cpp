@@ -15,8 +15,18 @@
 #include <sys/stat.h>
 #include <locale.h>
 
+
 #ifdef _WIN32
 #  include <windows.h>
+#endif
+
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+extern "C" {
+    int getTraceCount();
+    const char* getTraceName(int idx);
+    void fetchAndWriteTrace(int idx);
+}
 #endif
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -642,6 +652,25 @@ static void DrawContents()
         ImGui::PushFont( g_fonts.bold, FontNormal * 1.6f );
         tracy::TextCentered( buf );
         ImGui::PopFont();
+
+#ifdef __EMSCRIPTEN__
+        // --- Trace selection UI for WASM ---
+        static int selectedTrace = 0;
+        int traceCount = getTraceCount();
+        if (traceCount > 0) {
+            std::vector<const char*> traceNames(traceCount);
+            for (int i = 0; i < traceCount; ++i) {
+                traceNames[i] = getTraceName(i);
+            }
+            ImGui::Combo("Available Traces", &selectedTrace, traceNames.data(), traceCount);
+            if (ImGui::Button("Load Selected Trace")) {
+                fetchAndWriteTrace(selectedTrace);
+            }
+        } else {
+            ImGui::Text("No traces found.");
+        }
+#endif
+
         if( dpiChanged == 0 )
         {
             ImGui::SameLine( ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize( ICON_FA_WRENCH ).x );
