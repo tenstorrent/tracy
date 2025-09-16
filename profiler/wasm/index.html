@@ -102,11 +102,16 @@
       var Module = {
         preRun: [function() {
             fetchTracesList();
-            // Synchronously fetch and write the default trace file before main() runs
+            // Support ?trace=filename query param
+            function getQueryParam(name) {
+              var url = new URL(window.location.href);
+              return url.searchParams.get(name);
+            }
+            var traceParam = getQueryParam('trace');
+            var TRACE_FILENAME = traceParam ? traceParam : 'embed.tracy';
             var fetchFailed = false;
-            var TRACE_FILENAME = 'embed.tracy';
             var xhr = new XMLHttpRequest();
-            xhr.open('GET', TRACE_FILENAME + '?t=' + Date.now(), false); // synchronous
+            xhr.open('GET', (traceParam ? '/traces/' + encodeURIComponent(traceParam) : TRACE_FILENAME) + '?t=' + Date.now(), false); // synchronous
             xhr.overrideMimeType('text/plain; charset=x-user-defined');
             xhr.onload = function() {
               if (xhr.status === 200) {
@@ -115,8 +120,8 @@
                 for (var i = 0; i < s.length; i++) {
                   byteArray[i] = s.charCodeAt(i) & 0xff;
                 }
-                try { FS.unlink('/' + TRACE_FILENAME); } catch (e) {}
-                FS.writeFile('/' + TRACE_FILENAME, byteArray);
+                try { FS.unlink('/embed.tracy'); } catch (e) {}
+                FS.writeFile('/embed.tracy', byteArray);
                 console.log('embed.tracy written to Emscripten FS, size:', byteArray.length);
               } else {
                 fetchFailed = true;
@@ -187,13 +192,10 @@
         fetchAndWriteTrace: function(idx) {
           if (idx < 0 || idx >= tracyTracesList.length) return;
           var name = tracyTracesList[idx];
-          fetch('/traces/' + encodeURIComponent(name))
-            .then(r => r.arrayBuffer())
-            .then(buf => {
-              var data = new Uint8Array(buf);
-              FS.writeFile('embed.tracy', data);
-              location.reload();
-            });
+          // Reload page with ?trace=name
+          var url = new URL(window.location.href);
+          url.searchParams.set('trace', name);
+          window.location.href = url.toString();
         }
       });
 

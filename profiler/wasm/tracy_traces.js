@@ -13,14 +13,9 @@ mergeInto(LibraryManager.library, {
   fetchAndWriteTrace: function(idx) {
     if (typeof tracyTracesList === 'undefined' || idx < 0 || idx >= tracyTracesList.length) return;
     var name = tracyTracesList[idx];
-    // Call backend to set embed.tracy, then reload
-    fetch('/set-embed-tracy/' + encodeURIComponent(name), { method: 'GET' })
-      .then(r => {
-        if (!r.ok) throw new Error('Failed to set embed.tracy');
-        location.reload();
-      })
-      .catch(e => {
-        alert('Failed to load trace: ' + e);
-      });
+    // Reload page with ?trace=name
+    var url = new URL(window.location.href);
+    url.searchParams.set('trace', name);
+    window.location.href = url.toString();
   }
 });
