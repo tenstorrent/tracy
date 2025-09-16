@@ -5,16 +5,27 @@
 
 namespace tracy {
 
-enum class RiscType : uint8_t { BRISC, NCRISC, TRISC_0, TRISC_1, TRISC_2, ERISC, CORE_AGG };
+enum class RiscType : uint8_t {
+    BRISC,
+    NCRISC,
+    TRISC_0,
+    TRISC_1,
+    TRISC_2,
+    ERISC,
+    TENSIX_RISC_AGG  // TENSIX_RISC_AGG represents all the Tensix RISCs on device, but it itself isn't a RISC
+                     // defined on the device
+};
 
 enum class TTDeviceMarkerType : uint8_t { ZONE_START, ZONE_END, ZONE_TOTAL, TS_DATA, TS_EVENT };
 
 struct MarkerDetails {
     enum class MarkerNameKeyword : uint16_t {
+        _FW,
         BRISC_FW,
         ERISC_FW,
         NCRISC_FW,
         TRISC_FW,
+        _KERNEL,
         BRISC_KERNEL,
         ERISC_KERNEL,
         NCRISC_KERNEL,
@@ -30,10 +41,12 @@ struct MarkerDetails {
     };
 
     static inline std::unordered_map<std::string, MarkerNameKeyword> marker_name_keywords_map = {
+        {"-FW", MarkerNameKeyword::_FW},
         {"BRISC-FW", MarkerNameKeyword::BRISC_FW},
         {"ERISC-FW", MarkerNameKeyword::ERISC_FW},
         {"NCRISC-FW", MarkerNameKeyword::NCRISC_FW},
         {"TRISC-FW", MarkerNameKeyword::TRISC_FW},
+        {"-KERNEL", MarkerNameKeyword::_KERNEL},
         {"BRISC-KERNEL", MarkerNameKeyword::BRISC_KERNEL},
         {"ERISC-KERNEL", MarkerNameKeyword::ERISC_KERNEL},
         {"NCRISC-KERNEL", MarkerNameKeyword::NCRISC_KERNEL},
@@ -68,7 +81,6 @@ struct TTDeviceMarker {
     static constexpr uint64_t CORE_X_BIT_COUNT = 4;
     static constexpr uint64_t CORE_Y_BIT_COUNT = 4;
     static constexpr uint64_t CHIP_BIT_COUNT = 8;
-    static constexpr uint64_t RUNTIME_HOST_ID_BIT_COUNT = 16;
 
     static constexpr uint64_t CORE_X_BIT_SHIFT = RISC_BIT_COUNT;
     static constexpr uint64_t CORE_Y_BIT_SHIFT = CORE_X_BIT_SHIFT + CORE_X_BIT_COUNT;
@@ -76,9 +88,7 @@ struct TTDeviceMarker {
 
     static constexpr uint64_t INVALID_NUM = 1LL << 63;
 
-    static_assert(
-        (RISC_BIT_COUNT + CORE_X_BIT_COUNT + CORE_Y_BIT_COUNT + CHIP_BIT_COUNT + RUNTIME_HOST_ID_BIT_COUNT) <=
-        (sizeof(uint64_t) * 8));
+    static_assert((RISC_BIT_COUNT + CORE_X_BIT_COUNT + CORE_Y_BIT_COUNT + CHIP_BIT_COUNT) <= (sizeof(uint32_t) * 8));
 
     uint64_t runtime_host_id;
     uint64_t trace_id;
@@ -153,7 +163,7 @@ struct TTDeviceMarker {
         marker_name_keyword_flags(marker_name_keyword_flags),
         meta_data(meta_data) {}
 
-    TTDeviceMarker(uint64_t threadID) : runtime_host_id(-1), marker_id(-1) {
+    TTDeviceMarker(uint32_t threadID) : runtime_host_id(-1), marker_id(-1) {
         risc = static_cast<RiscType>((threadID) & ((1 << RISC_BIT_COUNT) - 1));
         core_x = (threadID >> CORE_X_BIT_SHIFT) & ((1 << CORE_X_BIT_COUNT) - 1);
         core_y = (threadID >> CORE_Y_BIT_SHIFT) & ((1 << CORE_Y_BIT_COUNT) - 1);
@@ -184,8 +194,8 @@ struct TTDeviceMarker {
                lhs.core_y == rhs.core_y && lhs.risc == rhs.risc && lhs.marker_id == rhs.marker_id;
     }
 
-    uint64_t get_thread_id() const {
-        uint64_t threadID = static_cast<uint8_t>(risc) | core_x << CORE_X_BIT_SHIFT | core_y << CORE_Y_BIT_SHIFT |
+    uint32_t get_thread_id() const {
+        uint32_t threadID = static_cast<uint8_t>(risc) | core_x << CORE_X_BIT_SHIFT | core_y << CORE_Y_BIT_SHIFT |
                             chip_id << CHIP_BIT_SHIFT;
 
         return threadID;

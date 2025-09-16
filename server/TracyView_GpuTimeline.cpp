@@ -19,7 +19,7 @@ std::string GetRiscName(RiscType risc) {
         case RiscType::TRISC_1: return "TRISC_1";
         case RiscType::TRISC_2: return "TRISC_2";
         case RiscType::ERISC: return "ERISC";
-        case RiscType::CORE_AGG: return "CORE_AGG";
+        case RiscType::TENSIX_RISC_AGG: return "TENSIX_RISC_AGG";
         default: return "UNKNOWN";
     }
 }
@@ -49,7 +49,7 @@ bool View::DrawGpu( const TimelineContext& ctx, const GpuCtxData& gpu, int& offs
     constexpr int threadNameSize = 30;
     char buf[threadNameSize];
 
-    Vector<uint64_t> tds;
+    Vector<uint32_t> tds;
     for( auto& td : gpu.threadData )
     {
         tds.push_back(td.first);
