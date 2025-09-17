@@ -1,4 +1,41 @@
+// Download a trace file from the server
+function downloadTrace(filename) {
+  const url = '/traces/' + encodeURIComponent(filename);
+  console.log('[Tracy] Downloading trace:', filename, 'from', url);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+// Delete a trace file from the server
+function deleteTrace(filename) {
+  if (!confirm('Are you sure you want to delete "' + filename + '"?')) return;
+  const url = '/traces/' + encodeURIComponent(filename);
+  fetch(url, { method: 'DELETE' })
+    .then(response => {
+      if (response.ok) {
+        alert('Deleted: ' + filename);
+        // If the current trace is the one deleted, remove the query param and reload
+        const urlObj = new URL(window.location.href);
+        if (urlObj.searchParams.get('trace') === filename) {
+          urlObj.searchParams.delete('trace');
+          window.location.href = urlObj.toString();
+        } else {
+          location.reload();
+        }
+      } else {
+        response.text().then(text => alert('Delete failed: ' + text));
+      }
+    })
+    .catch(err => alert('Delete failed: ' + err));
+}
+
 mergeInto(LibraryManager.library, {
+  downloadTrace: downloadTrace,
+  deleteTrace: deleteTrace,
   getTraceCount: function() {
     return typeof tracyTracesList !== 'undefined' ? tracyTracesList.length|0 : 0;
   },

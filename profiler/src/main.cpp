@@ -26,6 +26,8 @@ extern "C" {
     int getTraceCount();
     const char* getTraceName(int idx);
     void fetchAndWriteTrace(int idx);
+    void deleteTrace(const char*);
+    void downloadTrace(const char*);
 }
 #endif
 
@@ -663,8 +665,18 @@ static void DrawContents()
                 traceNames[i] = getTraceName(i);
             }
             ImGui::Combo("Available Traces", &selectedTrace, traceNames.data(), traceCount);
-            if (ImGui::Button("Load Selected Trace")) {
+            // Add View (eye) and Download (download) icons to buttons
+            // Use FontAwesome: ICON_FA_EYE and ICON_FA_DOWNLOAD
+            if (ImGui::Button(ICON_FA_EYE " View")) {
                 fetchAndWriteTrace(selectedTrace);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button(ICON_FA_DOWNLOAD " Download")) {
+                downloadTrace(traceNames[selectedTrace]);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button(ICON_FA_TRASH " Delete")) {
+                deleteTrace(traceNames[selectedTrace]);
             }
         } else {
             ImGui::Text("No traces found.");
