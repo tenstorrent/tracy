@@ -843,8 +843,8 @@ static void DrawContents()
                 if (ext != std::string::npos && ext == s.size() - 6) {
                     s = s.substr(0, ext);
                 }
-                if (s.size() > 32) {
-                    s = s.substr(0, 14) + "..." + s.substr(s.size() - 12);
+                if (s.size() > 64) {
+                    s = s.substr(0, 30) + "..." + s.substr(s.size() - 28);
                 }
                 shortNames.push_back(std::move(s));
             }
