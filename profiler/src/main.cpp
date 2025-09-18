@@ -655,33 +655,6 @@ static void DrawContents()
         tracy::TextCentered( buf );
         ImGui::PopFont();
 
-#ifdef __EMSCRIPTEN__
-        // --- Trace selection UI for WASM ---
-        static int selectedTrace = 0;
-        int traceCount = getTraceCount();
-        if (traceCount > 0) {
-            std::vector<const char*> traceNames(traceCount);
-            for (int i = 0; i < traceCount; ++i) {
-                traceNames[i] = getTraceName(i);
-            }
-            ImGui::Combo("Available Traces", &selectedTrace, traceNames.data(), traceCount);
-            // Add View (eye) and Download (download) icons to buttons
-            // Use FontAwesome: ICON_FA_EYE and ICON_FA_DOWNLOAD
-            if (ImGui::Button(ICON_FA_EYE " View")) {
-                fetchAndWriteTrace(selectedTrace);
-            }
-            ImGui::SameLine();
-            if (ImGui::Button(ICON_FA_DOWNLOAD " Download")) {
-                downloadTrace(traceNames[selectedTrace]);
-            }
-            ImGui::SameLine();
-            if (ImGui::Button(ICON_FA_TRASH " Delete")) {
-                deleteTrace(traceNames[selectedTrace]);
-            }
-        } else {
-            ImGui::Text("No traces found.");
-        }
-#endif
 
         if( dpiChanged == 0 )
         {
@@ -844,6 +817,63 @@ static void DrawContents()
             ImGui::PopFont();
             ImGui::EndPopup();
         }
+
+// --- Trace selection UI for WASM ---
+#ifdef __EMSCRIPTEN__
+        ImGui::Spacing();
+        ImGui::Separator();
+        static int selectedTrace = 0;
+        int traceCount = getTraceCount();
+        if (traceCount > 0) {
+            // Shorten trace names for display
+            static std::vector<std::string> shortNames;
+            static std::vector<const char*> shortNamePtrs;
+            shortNames.clear();
+            shortNamePtrs.clear();
+            for (int i = 0; i < traceCount; ++i) {
+                const char* fullName = getTraceName(i);
+                std::string s(fullName);
+                // Shorten: keep only the part after last '/' or '\', and trim to 32 chars max
+                size_t lastSlash = s.find_last_of("/\\");
+                if (lastSlash != std::string::npos && lastSlash + 1 < s.size()) {
+                    s = s.substr(lastSlash + 1);
+                }
+                // Remove .tracy extension if present
+                size_t ext = s.rfind(".tracy");
+                if (ext != std::string::npos && ext == s.size() - 6) {
+                    s = s.substr(0, ext);
+                }
+                if (s.size() > 32) {
+                    s = s.substr(0, 14) + "..." + s.substr(s.size() - 12);
+                }
+                shortNames.push_back(std::move(s));
+            }
+            for (auto& sn : shortNames) shortNamePtrs.push_back(sn.c_str());
+
+
+            ImGui::Text("Runs");
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+            ImGui::PushFont(g_fonts.mono, FontNormal);
+            ImGui::Combo("##tracelist", &selectedTrace, shortNamePtrs.data(), traceCount);
+            ImGui::PopFont();
+
+            ImGui::Spacing();
+            if (ImGui::Button(ICON_FA_EYE " View")) {
+                fetchAndWriteTrace(selectedTrace);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button(ICON_FA_DOWNLOAD " Download")) {
+                downloadTrace(getTraceName(selectedTrace));
+            }
+            ImGui::SameLine();
+            if (ImGui::Button(ICON_FA_TRASH " Delete")) {
+                deleteTrace(getTraceName(selectedTrace));
+            }
+        } else {
+            ImGui::Text("No traces found.");
+        }
+        ImGui::Separator();
+#endif
         ImGui::Spacing();
         if( ImGui::Button( ICON_FA_BOOK " Manual" ) )
         {
