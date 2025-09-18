@@ -132,7 +132,7 @@
             };
             xhr.send();
             if (fetchFailed) {
-              alert('Trace file not found or failed to load. Please generate or upload embed.tracy.');
+              alert('Trace file not found or failed to load. Run with python -m tracy to generate trace files.');
               throw new Error('embed.tracy not found');
             }
         }],

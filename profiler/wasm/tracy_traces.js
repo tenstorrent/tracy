@@ -1,5 +1,7 @@
 // Download a trace file from the server
-function downloadTrace(filename) {
+function downloadTrace(ptr) {
+  const filename = UTF8ToString(ptr);
+  console.info('C++');
   const url = '/traces/' + encodeURIComponent(filename);
   console.log('[Tracy] Downloading trace:', filename, 'from', url);
   const a = document.createElement('a');
@@ -11,7 +13,8 @@ function downloadTrace(filename) {
 }
 
 // Delete a trace file from the server
-function deleteTrace(filename) {
+function deleteTrace(ptr) {
+  const filename = UTF8ToString(ptr);
   if (!confirm('Are you sure you want to delete "' + filename + '"?')) return;
   const url = '/traces/' + encodeURIComponent(filename);
   fetch(url, { method: 'DELETE' })
