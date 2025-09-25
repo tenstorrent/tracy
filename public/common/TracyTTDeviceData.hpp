@@ -81,6 +81,7 @@ struct TTDeviceMarker {
         (sizeof(uint64_t) * 8));
 
     uint64_t runtime_host_id;
+    uint64_t trace_id;
     uint64_t chip_id;
     uint64_t core_x;
     uint64_t core_y;
@@ -98,6 +99,7 @@ struct TTDeviceMarker {
 
     TTDeviceMarker() :
         runtime_host_id(INVALID_NUM),
+        trace_id(INVALID_NUM),
         chip_id(INVALID_NUM),
         core_x(INVALID_NUM),
         core_y(INVALID_NUM),
@@ -115,6 +117,7 @@ struct TTDeviceMarker {
 
     TTDeviceMarker(
         uint64_t runtime_host_id,
+        uint64_t trace_id,
         uint64_t chip_id,
         uint64_t core_x,
         uint64_t core_y,
@@ -130,6 +133,7 @@ struct TTDeviceMarker {
         const std::array<bool, static_cast<uint16_t>(MarkerDetails::MarkerNameKeyword::COUNT)>& marker_name_keyword_flags,
         const nlohmann::json& meta_data) :
         runtime_host_id(runtime_host_id),
+        trace_id(trace_id),
         chip_id(chip_id),
         core_x(core_x),
         core_y(core_y),
