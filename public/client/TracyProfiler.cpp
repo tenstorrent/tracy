@@ -304,7 +304,7 @@ static inline void CpuId( uint32_t* regs, uint32_t leaf )
 #endif
 }
 
-static void InitFailure( const char* msg )
+[[maybe_unused]] static void InitFailure( const char* msg )
 {
 #if defined _WIN32
     bool hasConsole = false;
