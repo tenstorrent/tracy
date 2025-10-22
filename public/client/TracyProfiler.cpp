@@ -289,7 +289,7 @@ static bool EnsureReadable( uintptr_t address )
     return memInfo.Protect != PAGE_NOACCESS;
 }
 #else
-static bool EnsureReadable( uintptr_t address )
+__attribute__ ((__unused__)) static bool EnsureReadable( uintptr_t address )
 {
     return true;
 }
