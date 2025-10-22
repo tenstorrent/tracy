@@ -8691,7 +8691,7 @@ void Worker::CacheSourceFromFile( const char* fn )
     const auto sz = ftell( f );
     fseek( f, 0, SEEK_SET );
     auto src = (char*)m_slab.AllocBig( sz );
-    fread( src, 1, sz, f );
+    auto ret = fread( src, 1, sz, f );
     fclose( f );
     m_data.sourceFileCache.emplace( fn, MemoryBlock{ src, uint32_t( sz ) } );
 }
