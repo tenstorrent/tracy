@@ -99,6 +99,7 @@ struct TTDeviceMarker {
     RiscType risc;
     uint16_t marker_id;
     uint64_t timestamp;
+    uint64_t buffer_index;
     uint64_t data;
     std::string op_name;
     uint64_t line;
@@ -118,6 +119,7 @@ struct TTDeviceMarker {
         risc(RiscType::BRISC),
         marker_id(INVALID_NUM),
         timestamp(INVALID_NUM),
+        buffer_index(INVALID_NUM),
         data(INVALID_NUM),
         op_name(""),
         line(INVALID_NUM),
@@ -137,6 +139,7 @@ struct TTDeviceMarker {
         RiscType risc,
         uint16_t marker_id,
         uint64_t timestamp,
+        uint64_t buffer_index,
         uint64_t data,
         const std::string& op_name,
         uint64_t line,
@@ -154,6 +157,7 @@ struct TTDeviceMarker {
         risc(risc),
         marker_id(marker_id),
         timestamp(timestamp),
+        buffer_index(buffer_index),
         data(data),
         op_name(op_name),
         line(line),
@@ -168,6 +172,7 @@ struct TTDeviceMarker {
         core_x = (threadID >> CORE_X_BIT_SHIFT) & ((1 << CORE_X_BIT_COUNT) - 1);
         core_y = (threadID >> CORE_Y_BIT_SHIFT) & ((1 << CORE_Y_BIT_COUNT) - 1);
         chip_id = (threadID >> CHIP_BIT_SHIFT) & ((1 << CHIP_BIT_COUNT) - 1);
+        buffer_index = INVALID_NUM;
     }
 
     friend bool operator<(const TTDeviceMarker& lhs, const TTDeviceMarker& rhs) {
