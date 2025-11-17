@@ -1,6 +1,7 @@
 #ifndef __TRACYTTDEVICEDATA_HPP__
 #define __TRACYTTDEVICEDATA_HPP__
 
+#include <enchantum/enchantum.hpp>
 #include <nlohmann/json.hpp>
 
 namespace tracy {
@@ -192,6 +193,44 @@ struct TTDeviceMarker {
     friend bool operator==(const TTDeviceMarker& lhs, const TTDeviceMarker& rhs) {
         return lhs.timestamp == rhs.timestamp && lhs.chip_id == rhs.chip_id && lhs.core_x == rhs.core_x &&
                lhs.core_y == rhs.core_y && lhs.risc == rhs.risc && lhs.marker_id == rhs.marker_id;
+    }
+
+    std::string to_string() const {
+        std::string marker_str;
+        marker_str += "Program Execution UID: (" + std::to_string(this->runtime_host_id) + ", " +
+                      std::to_string(this->trace_id) + ", " + std::to_string(this->trace_id_counter) + ")\n";
+        marker_str += "Chip ID: " + std::to_string(this->chip_id) + "\n";
+        marker_str += "Physical Core: (" + std::to_string(this->core_x) + ", " + std::to_string(this->core_y) + ")\n";
+        marker_str += "RISC: " + std::string(enchantum::to_string(this->risc)) + "\n";
+        marker_str += "Marker ID: " + std::to_string(this->marker_id) + "\n";
+        marker_str += "Marker Name: " + this->marker_name + "\n";
+        marker_str += "Marker Type: " + std::string(enchantum::to_string(this->marker_type)) + "\n";
+
+        marker_str += "Marker Name Keywords: [";
+        bool first_keyword = true;
+        for (size_t i = 0; i < this->marker_name_keyword_flags.size(); ++i) {
+            if (this->marker_name_keyword_flags[i]) {
+                for (const auto& [keyword_str, keyword_enum] : MarkerDetails::marker_name_keywords_map) {
+                    if (static_cast<uint16_t>(keyword_enum) == i) {
+                        if (!first_keyword) {
+                            marker_str += ", ";
+                        }
+                        marker_str += keyword_str;
+                        first_keyword = false;
+                        break;
+                    }
+                }
+            }
+        }
+        marker_str += "]\n";
+
+        marker_str += "Timestamp: " + std::to_string(this->timestamp) + "\n";
+        marker_str += "Data: " + std::to_string(this->data) + "\n";
+        marker_str += "Op Name: " + this->op_name + "\n";
+        marker_str += "Line: " + std::to_string(this->line) + "\n";
+        marker_str += "File: " + this->file + "\n";
+        marker_str += "Meta Data: " + this->meta_data.dump() + "\n";
+        return marker_str;
     }
 
     uint32_t get_thread_id() const {
