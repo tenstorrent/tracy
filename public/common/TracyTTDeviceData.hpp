@@ -17,7 +17,7 @@ enum class RiscType : uint8_t {
                      // defined on the device
 };
 
-enum class TTDeviceMarkerType : uint8_t { ZONE_START, ZONE_END, ZONE_TOTAL, TS_DATA, TS_EVENT };
+enum class TTDeviceMarkerType : uint8_t { ZONE_START, ZONE_END, ZONE_TOTAL, TS_DATA, TS_EVENT, TS_DATA_16B };
 
 struct MarkerDetails {
     enum class MarkerNameKeyword : uint16_t {
