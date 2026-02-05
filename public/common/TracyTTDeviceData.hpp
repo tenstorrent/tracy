@@ -13,8 +13,9 @@ enum class RiscType : uint8_t {
     TRISC_1,
     TRISC_2,
     ERISC,
-    TENSIX_RISC_AGG  // TENSIX_RISC_AGG represents all the Tensix RISCs on device, but it itself isn't a RISC
-                     // defined on the device
+    TENSIX_RISC_AGG,  // TENSIX_RISC_AGG represents all the Tensix RISCs on device, but it itself isn't a RISC
+                      // defined on the device
+    NONE              // No RISC label displayed (used for host-side telemetry contexts)
 };
 
 enum class TTDeviceMarkerType : uint8_t { ZONE_START, ZONE_END, ZONE_TOTAL, TS_DATA, TS_EVENT };

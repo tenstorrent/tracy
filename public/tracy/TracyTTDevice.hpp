@@ -189,6 +189,8 @@ namespace tracy {
                     return tracy::Color::CadetBlue1;
                 case RiscType::ERISC:
                     return tracy::Color::Yellow3;
+                case RiscType::NONE:
+                    return tracy::Color::DarkSlateGray3;
                 default:
                     TRACY_TT_ASSERT(marker.risc == RiscType::TENSIX_RISC_AGG);
                     return tracy::Color::DarkSlateGray3;

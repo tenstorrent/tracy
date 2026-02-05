@@ -20,6 +20,7 @@ std::string GetRiscName(RiscType risc) {
         case RiscType::TRISC_2: return "TRISC_2";
         case RiscType::ERISC: return "ERISC";
         case RiscType::TENSIX_RISC_AGG: return "TENSIX_RISC_AGG";
+        case RiscType::NONE: return "";
         default: return "UNKNOWN";
     }
 }
