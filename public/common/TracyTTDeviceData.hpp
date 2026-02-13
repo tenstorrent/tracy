@@ -109,6 +109,7 @@ struct TTDeviceMarker {
     TTDeviceMarkerType marker_type;
     std::array<bool, static_cast<uint16_t>(MarkerDetails::MarkerNameKeyword::COUNT)> marker_name_keyword_flags;
     nlohmann::json meta_data;
+    uint32_t color = 0;  // 0 means use default color logic; non-zero overrides zone color
 
     TTDeviceMarker() :
         runtime_host_id(INVALID_NUM),
@@ -127,7 +128,8 @@ struct TTDeviceMarker {
         marker_name(""),
         marker_type(TTDeviceMarkerType::ZONE_START),
         marker_name_keyword_flags(std::array<bool, static_cast<uint16_t>(MarkerDetails::MarkerNameKeyword::COUNT)>()),
-        meta_data(nlohmann::json::object()) {}
+        meta_data(nlohmann::json::object()),
+        color(0) {}
 
     TTDeviceMarker(
         uint64_t runtime_host_id,
@@ -146,7 +148,8 @@ struct TTDeviceMarker {
         const std::string& marker_name,
         TTDeviceMarkerType marker_type,
         const std::array<bool, static_cast<uint16_t>(MarkerDetails::MarkerNameKeyword::COUNT)>& marker_name_keyword_flags,
-        const nlohmann::json& meta_data) :
+        const nlohmann::json& meta_data,
+        uint32_t color = 0) :
         runtime_host_id(runtime_host_id),
         trace_id(trace_id),
         trace_id_counter(trace_id_counter),
@@ -163,7 +166,8 @@ struct TTDeviceMarker {
         marker_name(marker_name),
         marker_type(marker_type),
         marker_name_keyword_flags(marker_name_keyword_flags),
-        meta_data(meta_data) {}
+        meta_data(meta_data),
+        color(color) {}
 
     TTDeviceMarker(uint32_t threadID) : runtime_host_id(-1), marker_id(-1) {
         risc = static_cast<RiscType>((threadID) & ((1 << RISC_BIT_COUNT) - 1));

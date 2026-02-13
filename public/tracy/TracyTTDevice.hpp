@@ -173,6 +173,9 @@ namespace tracy {
         }
 
         tracy::Color::ColorType getMarkerColor(const TTDeviceMarker& marker) {
+            if (marker.color != 0) {
+                return static_cast<tracy::Color::ColorType>(marker.color);
+            }
             if (marker.marker_name_keyword_flags[static_cast<uint16_t>(MarkerDetails::MarkerNameKeyword::PROFILER)]) {
                 return tracy::Color::Tomato3;
             }
