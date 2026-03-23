@@ -32,12 +32,12 @@ const char* View::GetGpuContextLabel( const GpuCtxData* gpu )
     static char buf[4096];
     if( gpu->name.Active() )
     {
-        sprintf( buf, "%s", m_worker.GetString( gpu->name ) );
+        snprintf( buf, sizeof( buf ), "%s", m_worker.GetString( gpu->name ) );
     }
     else
     {
         auto& item = (TimelineItemGpu&)( m_tc.GetItem( gpu ) );
-        sprintf( buf, "%s context %i", GpuContextNames[(int)gpu->type], item.GetIdx() );
+        snprintf( buf, sizeof( buf ), "%s context %i", GpuContextNames[(int)gpu->type], item.GetIdx() );
     }
     return buf;
 }
