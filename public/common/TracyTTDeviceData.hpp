@@ -1,10 +1,17 @@
 #ifndef __TRACYTTDEVICEDATA_HPP__
 #define __TRACYTTDEVICEDATA_HPP__
 
+#include <array>
+#include <cstdint>
+#include <string>
+#include <unordered_map>
+
+#ifdef __has_include
 #if __has_include(<enchantum/enchantum.hpp>) && __has_include(<nlohmann/json.hpp>)
 #define TRACY_TT_HAS_FULL_DEPS
 #include <enchantum/enchantum.hpp>
 #include <nlohmann/json.hpp>
+#endif
 #endif
 
 namespace tracy {
