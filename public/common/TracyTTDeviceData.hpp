@@ -1,8 +1,18 @@
 #ifndef __TRACYTTDEVICEDATA_HPP__
 #define __TRACYTTDEVICEDATA_HPP__
 
+#include <array>
+#include <cstdint>
+#include <string>
+#include <unordered_map>
+
+#ifdef __has_include
+#if __has_include(<enchantum/enchantum.hpp>) && __has_include(<nlohmann/json.hpp>)
+#define TRACY_TT_HAS_FULL_DEPS
 #include <enchantum/enchantum.hpp>
 #include <nlohmann/json.hpp>
+#endif
+#endif
 
 namespace tracy {
 
@@ -107,7 +117,9 @@ struct TTDeviceMarker {
     std::string marker_name;
     TTDeviceMarkerType marker_type;
     std::array<bool, static_cast<uint16_t>(MarkerDetails::MarkerNameKeyword::COUNT)> marker_name_keyword_flags;
+#ifdef TRACY_TT_HAS_FULL_DEPS
     nlohmann::json meta_data;
+#endif
 
     TTDeviceMarker() :
         runtime_host_id(INVALID_NUM),
@@ -125,9 +137,13 @@ struct TTDeviceMarker {
         file(""),
         marker_name(""),
         marker_type(TTDeviceMarkerType::ZONE_START),
-        marker_name_keyword_flags(std::array<bool, static_cast<uint16_t>(MarkerDetails::MarkerNameKeyword::COUNT)>()),
-        meta_data(nlohmann::json::object()) {}
+        marker_name_keyword_flags(std::array<bool, static_cast<uint16_t>(MarkerDetails::MarkerNameKeyword::COUNT)>())
+#ifdef TRACY_TT_HAS_FULL_DEPS
+        , meta_data(nlohmann::json::object())
+#endif
+        {}
 
+#ifdef TRACY_TT_HAS_FULL_DEPS
     TTDeviceMarker(
         uint64_t runtime_host_id,
         uint64_t trace_id,
@@ -163,6 +179,7 @@ struct TTDeviceMarker {
         marker_type(marker_type),
         marker_name_keyword_flags(marker_name_keyword_flags),
         meta_data(meta_data) {}
+#endif
 
     TTDeviceMarker(uint32_t threadID) : runtime_host_id(-1), marker_id(-1) {
         risc = static_cast<RiscType>((threadID) & ((1 << RISC_BIT_COUNT) - 1));
@@ -195,6 +212,7 @@ struct TTDeviceMarker {
                lhs.core_y == rhs.core_y && lhs.risc == rhs.risc && lhs.marker_id == rhs.marker_id;
     }
 
+#ifdef TRACY_TT_HAS_FULL_DEPS
     std::string to_string() const {
         std::string marker_str;
         marker_str += "Program Execution UID: (" + std::to_string(this->runtime_host_id) + ", " +
@@ -232,6 +250,7 @@ struct TTDeviceMarker {
         marker_str += "Meta Data: " + this->meta_data.dump() + "\n";
         return marker_str;
     }
+#endif
 
     uint32_t get_thread_id() const {
         uint32_t threadID = static_cast<uint8_t>(risc) | core_x << CORE_X_BIT_SHIFT | core_y << CORE_Y_BIT_SHIFT |
