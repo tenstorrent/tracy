@@ -1,3 +1,4 @@
+#include <cctype>
 #include <inttypes.h>
 #include <random>
 
@@ -17,7 +18,7 @@ static bool FuzzyMatch( const char* haystack, const char* needle )
     while( *needle )
     {
         if( !*haystack ) return false;
-        if( tolower( (unsigned char)*haystack ) == tolower( (unsigned char)*needle ) )
+        if( std::tolower( (unsigned char)*haystack ) == std::tolower( (unsigned char)*needle ) )
         {
             ++needle;
         }
