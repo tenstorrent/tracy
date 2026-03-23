@@ -12,6 +12,35 @@
 namespace tracy
 {
 
+static bool FuzzyMatch( const char* haystack, const char* needle )
+{
+    while( *needle )
+    {
+        if( !*haystack ) return false;
+        if( tolower( (unsigned char)*haystack ) == tolower( (unsigned char)*needle ) )
+        {
+            ++needle;
+        }
+        ++haystack;
+    }
+    return true;
+}
+
+const char* View::GetGpuContextLabel( const GpuCtxData* gpu )
+{
+    static char buf[4096];
+    if( gpu->name.Active() )
+    {
+        sprintf( buf, "%s", m_worker.GetString( gpu->name ) );
+    }
+    else
+    {
+        auto& item = (TimelineItemGpu&)( m_tc.GetItem( gpu ) );
+        sprintf( buf, "%s context %i", GpuContextNames[(int)gpu->type], item.GetIdx() );
+    }
+    return buf;
+}
+
 void View::DrawOptions()
 {
     ImGui::Begin( "Options", &m_showOptions, ImGuiWindowFlags_AlwaysAutoResize );
@@ -97,7 +126,9 @@ void View::DrawOptions()
 	    {
 		for( size_t i=0; i<gpuData.size(); i++ )
 		{
-		    m_tc.GetItem( gpuData[i] ).SetVisible( true );
+		    const char* label = GetGpuContextLabel( gpuData[i] );
+		    if( !m_gpuFilterBuf[0] || FuzzyMatch( label, m_gpuFilterBuf ) )
+			m_tc.GetItem( gpuData[i] ).SetVisible( true );
 		}
 	    }
 	    ImGui::SameLine();
@@ -105,12 +136,20 @@ void View::DrawOptions()
 	    {
 		for( size_t i=0; i<gpuData.size(); i++ )
 		{
-		    m_tc.GetItem( gpuData[i] ).SetVisible( false );
+		    const char* label = GetGpuContextLabel( gpuData[i] );
+		    if( !m_gpuFilterBuf[0] || FuzzyMatch( label, m_gpuFilterBuf ) )
+			m_tc.GetItem( gpuData[i] ).SetVisible( false );
 		}
 	    }
 
+            ImGui::SetNextItemWidth( 200 * scale );
+            ImGui::InputTextWithHint( "##gpufilter", ICON_FA_FILTER " Filter GPU contexts", m_gpuFilterBuf, 256 );
+
             for( size_t i=0; i<gpuData.size(); i++ )
             {
+                const char* label = GetGpuContextLabel( gpuData[i] );
+                if( m_gpuFilterBuf[0] && !FuzzyMatch( label, m_gpuFilterBuf ) ) continue;
+
                 const auto& timeline = gpuData[i]->threadData.begin()->second.timeline;
                 m_tc.GetItem( gpuData[i] ).VisibilityCheckbox();
                 ImGui::SameLine();
