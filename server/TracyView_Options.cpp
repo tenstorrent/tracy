@@ -1,5 +1,8 @@
+#include <algorithm>
 #include <inttypes.h>
+#include <numeric>
 #include <random>
+#include <string>
 
 #include "TracyFilesystem.hpp"
 #include "TracyImGui.hpp"
@@ -11,6 +14,32 @@
 
 namespace tracy
 {
+
+static int NaturalCompare( const std::string& a, const std::string& b )
+{
+    const char* pa = a.c_str();
+    const char* pb = b.c_str();
+    while( *pa && *pb )
+    {
+        if( isdigit( (unsigned char)*pa ) && isdigit( (unsigned char)*pb ) )
+        {
+            unsigned long na = strtoul( pa, const_cast<char**>(&pa), 10 );
+            unsigned long nb = strtoul( pb, const_cast<char**>(&pb), 10 );
+            if( na != nb ) return na < nb ? -1 : 1;
+        }
+        else
+        {
+            int ca = tolower( (unsigned char)*pa );
+            int cb = tolower( (unsigned char)*pb );
+            if( ca != cb ) return ca < cb ? -1 : 1;
+            ++pa;
+            ++pb;
+        }
+    }
+    if( *pa ) return 1;
+    if( *pb ) return -1;
+    return 0;
+}
 
 static bool FuzzyMatch( const char* haystack, const char* needle )
 {
@@ -145,37 +174,48 @@ void View::DrawOptions()
             ImGui::SetNextItemWidth( 200 * scale );
             ImGui::InputTextWithHint( "##gpufilter", ICON_FA_FILTER " Filter GPU contexts", m_gpuFilterBuf, 256 );
 
+            std::vector<size_t> gpuOrder( gpuData.size() );
+            std::iota( gpuOrder.begin(), gpuOrder.end(), 0 );
+            std::vector<std::string> gpuLabels( gpuData.size() );
             for( size_t i=0; i<gpuData.size(); i++ )
             {
-                const char* label = GetGpuContextLabel( gpuData[i] );
+                gpuLabels[i] = GetGpuContextLabel( gpuData[i] );
+            }
+            std::sort( gpuOrder.begin(), gpuOrder.end(), [&gpuLabels]( size_t a, size_t b ) {
+                return NaturalCompare( gpuLabels[a], gpuLabels[b] ) < 0;
+            } );
+
+            for( auto idx : gpuOrder )
+            {
+                const char* label = gpuLabels[idx].c_str();
                 if( m_gpuFilterBuf[0] && !FuzzyMatch( label, m_gpuFilterBuf ) ) continue;
 
-                const auto& timeline = gpuData[i]->threadData.begin()->second.timeline;
-                m_tc.GetItem( gpuData[i] ).VisibilityCheckbox();
+                const auto& timeline = gpuData[idx]->threadData.begin()->second.timeline;
+                m_tc.GetItem( gpuData[idx] ).VisibilityCheckbox();
                 ImGui::SameLine();
-                if( gpuData[i]->threadData.size() == 1 )
+                if( gpuData[idx]->threadData.size() == 1 )
                 {
                     ImGui::TextDisabled( "%s top level zones", RealToString( timeline.size() ) );
                 }
                 else
                 {
-                    ImGui::TextDisabled( "%s threads", RealToString( gpuData[i]->threadData.size() ) );
+                    ImGui::TextDisabled( "%s threads", RealToString( gpuData[idx]->threadData.size() ) );
                 }
-                if( gpuData[i]->name.Active() )
+                if( gpuData[idx]->name.Active() )
                 {
                     char buf[64];
-                    auto& item = (TimelineItemGpu&)( m_tc.GetItem( gpuData[i] ) );
-                    sprintf( buf, "%s context %i", GpuContextNames[(int)gpuData[i]->type], item.GetIdx() );
+                    auto& item = (TimelineItemGpu&)( m_tc.GetItem( gpuData[idx] ) );
+                    sprintf( buf, "%s context %i", GpuContextNames[(int)gpuData[idx]->type], item.GetIdx() );
                     ImGui::PushFont( m_smallFont );
                     ImGui::TextUnformatted( buf );
                     ImGui::PopFont();
                 }
-                if( !gpuData[i]->hasCalibration )
+                if( !gpuData[idx]->hasCalibration )
                 {
                     ImGui::TreePush( (void*)nullptr );
-                    auto& drift = GpuDrift( gpuData[i] );
+                    auto& drift = GpuDrift( gpuData[idx] );
                     ImGui::SetNextItemWidth( 120 * scale );
-                    ImGui::PushID( i );
+                    ImGui::PushID( (int)idx );
                     ImGui::InputInt( "Drift (ns/s)", &drift );
                     ImGui::PopID();
                     if( timeline.size() > 1 )
@@ -213,7 +253,7 @@ void View::DrawOptions()
                             std::default_random_engine gen( rd() );
                             std::uniform_int_distribution<size_t> dist( 0, lastidx - 1 );
                             float slopes[NumSlopes];
-                            size_t idx = 0;
+                            size_t slopeIdx = 0;
                             if( timeline.is_magic() )
                             {
                                 auto& tl = *((Vector<GpuEvent>*)&timeline);
@@ -223,10 +263,10 @@ void View::DrawOptions()
                                     const auto p1 = dist( gen );
                                     if( p0 != p1 )
                                     {
-                                        slopes[idx++] = float( 1.0 - double( tl[p1].GpuStart() - tl[p0].GpuStart() ) / double( tl[p1].CpuStart() - tl[p0].CpuStart() ) );
+                                        slopes[slopeIdx++] = float( 1.0 - double( tl[p1].GpuStart() - tl[p0].GpuStart() ) / double( tl[p1].CpuStart() - tl[p0].CpuStart() ) );
                                     }
                                 }
-                                while( idx < NumSlopes );
+                                while( slopeIdx < NumSlopes );
                             }
                             else
                             {
@@ -236,10 +276,10 @@ void View::DrawOptions()
                                     const auto p1 = dist( gen );
                                     if( p0 != p1 )
                                     {
-                                        slopes[idx++] = float( 1.0 - double( timeline[p1]->GpuStart() - timeline[p0]->GpuStart() ) / double( timeline[p1]->CpuStart() - timeline[p0]->CpuStart() ) );
+                                        slopes[slopeIdx++] = float( 1.0 - double( timeline[p1]->GpuStart() - timeline[p0]->GpuStart() ) / double( timeline[p1]->CpuStart() - timeline[p0]->CpuStart() ) );
                                     }
                                 }
-                                while( idx < NumSlopes );
+                                while( slopeIdx < NumSlopes );
                             }
                             std::sort( slopes, slopes+NumSlopes );
                             drift = int( 1000000000 * -slopes[NumSlopes/2] );
