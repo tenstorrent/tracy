@@ -42,18 +42,150 @@ static int NaturalCompare( const std::string& a, const std::string& b )
     return 0;
 }
 
+struct SearchPart
+{
+    std::string text;
+    bool isDigit;
+};
+
+static std::vector<std::string> ExtractWords( const char* s )
+{
+    std::vector<std::string> words;
+    while( *s )
+    {
+        if( isalnum( (unsigned char)*s ) )
+        {
+            std::string w;
+            while( *s && isalnum( (unsigned char)*s ) ) w += *s++;
+            words.push_back( std::move( w ) );
+        }
+        else ++s;
+    }
+    return words;
+}
+
+static std::vector<SearchPart> SplitParts( const char* s )
+{
+    std::string alnum;
+    for( ; *s; ++s )
+        if( isalnum( (unsigned char)*s ) ) alnum += *s;
+    std::vector<SearchPart> parts;
+    size_t i = 0;
+    while( i < alnum.size() )
+    {
+        bool dig = isdigit( (unsigned char)alnum[i] ) != 0;
+        std::string p;
+        while( i < alnum.size() && ( isdigit( (unsigned char)alnum[i] ) != 0 ) == dig )
+            p += alnum[i++];
+        parts.push_back( { std::move( p ), dig } );
+    }
+    return parts;
+}
+
+static bool CiPrefix( const std::string& word, const std::string& prefix )
+{
+    if( prefix.size() > word.size() ) return false;
+    for( size_t i = 0; i < prefix.size(); i++ )
+        if( std::tolower( (unsigned char)word[i] ) != std::tolower( (unsigned char)prefix[i] ) ) return false;
+    return true;
+}
+
+static bool MatchParts( const std::vector<std::string>& words, size_t wi,
+                        const std::vector<SearchPart>& parts, size_t pi, bool anchorDigit )
+{
+    if( pi >= parts.size() ) return true;
+    const auto& part = parts[pi];
+
+    if( part.isDigit )
+    {
+        if( anchorDigit )
+        {
+            while( wi < words.size() && !isdigit( (unsigned char)words[wi][0] ) ) ++wi;
+            if( wi >= words.size() ) return false;
+            std::string cat;
+            size_t we = wi;
+            while( we < words.size() && isdigit( (unsigned char)words[we][0] ) ) cat += words[we++];
+            return CiPrefix( cat, part.text ) && MatchParts( words, we, parts, pi + 1, true );
+        }
+        for( size_t i = wi; i < words.size(); i++ )
+        {
+            if( !isdigit( (unsigned char)words[i][0] ) ) continue;
+            std::string cat;
+            size_t we = i;
+            while( we < words.size() && isdigit( (unsigned char)words[we][0] ) ) cat += words[we++];
+            if( CiPrefix( cat, part.text ) && MatchParts( words, we, parts, pi + 1, true ) )
+                return true;
+            i = we - 1;
+        }
+        return false;
+    }
+
+    for( size_t i = wi; i < words.size(); i++ )
+    {
+        if( isdigit( (unsigned char)words[i][0] ) ) continue;
+        if( CiPrefix( words[i], part.text ) && MatchParts( words, i + 1, parts, pi + 1, true ) )
+            return true;
+    }
+    return false;
+}
+
+static bool MatchCondition( const std::vector<std::string>& words, const char* token )
+{
+    auto parts = SplitParts( token );
+    return parts.empty() || MatchParts( words, 0, parts, 0, false );
+}
+
 static bool FuzzyMatch( const char* haystack, const char* needle )
 {
-    while( *needle )
+    auto words = ExtractWords( haystack );
+    std::string search( needle );
+
+    size_t orStart = 0;
+    bool anyOrGroup = false;
+    while( orStart <= search.size() )
     {
-        if( !*haystack ) return false;
-        if( std::tolower( (unsigned char)*haystack ) == std::tolower( (unsigned char)*needle ) )
+        size_t orEnd = search.find( '|', orStart );
+        if( orEnd == std::string::npos ) orEnd = search.size();
+        std::string orGroup = search.substr( orStart, orEnd - orStart );
+
+        bool groupMatch = true;
+        size_t start = 0;
+        bool hasConditions = false;
+        while( start < orGroup.size() )
         {
-            ++needle;
+            while( start < orGroup.size() && orGroup[start] == '&' ) ++start;
+            if( start >= orGroup.size() ) break;
+            size_t end = start;
+            while( end < orGroup.size() && orGroup[end] != '&' ) ++end;
+            std::string token = orGroup.substr( start, end - start );
+            start = end;
+
+            size_t ti = 0;
+            while( ti < token.size() && token[ti] == ' ' ) ++ti;
+            if( ti >= token.size() ) continue;
+
+            bool negate = false;
+            if( token[ti] == '!' )
+            {
+                negate = true;
+                token = token.substr( ti + 1 );
+            }
+            else
+            {
+                token = token.substr( ti );
+            }
+
+            hasConditions = true;
+            bool matches = MatchCondition( words, token.c_str() );
+            if( negate ) matches = !matches;
+            if( !matches ) { groupMatch = false; break; }
         }
-        ++haystack;
+
+        if( hasConditions ) anyOrGroup = true;
+        if( groupMatch && hasConditions ) return true;
+        orStart = orEnd + 1;
     }
-    return true;
+    return !anyOrGroup;
 }
 
 const char* View::GetGpuContextLabel( const GpuCtxData* gpu )
