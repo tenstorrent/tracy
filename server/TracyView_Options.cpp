@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cctype>
 #include <inttypes.h>
 #include <numeric>
 #include <random>
@@ -46,7 +47,7 @@ static bool FuzzyMatch( const char* haystack, const char* needle )
     while( *needle )
     {
         if( !*haystack ) return false;
-        if( tolower( (unsigned char)*haystack ) == tolower( (unsigned char)*needle ) )
+        if( std::tolower( (unsigned char)*haystack ) == std::tolower( (unsigned char)*needle ) )
         {
             ++needle;
         }
@@ -60,12 +61,12 @@ const char* View::GetGpuContextLabel( const GpuCtxData* gpu )
     static char buf[4096];
     if( gpu->name.Active() )
     {
-        sprintf( buf, "%s", m_worker.GetString( gpu->name ) );
+        snprintf( buf, sizeof( buf ), "%s", m_worker.GetString( gpu->name ) );
     }
     else
     {
         auto& item = (TimelineItemGpu&)( m_tc.GetItem( gpu ) );
-        sprintf( buf, "%s context %i", GpuContextNames[(int)gpu->type], item.GetIdx() );
+        snprintf( buf, sizeof( buf ), "%s context %i", GpuContextNames[(int)gpu->type], item.GetIdx() );
     }
     return buf;
 }
