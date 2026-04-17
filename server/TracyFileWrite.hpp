@@ -92,7 +92,7 @@ public:
         {
             ZSTD_outBuffer out = { m_compressed, FileBoundSize, 0 };
             ZSTD_inBuffer in = { m_buf, sz, 0 };
-            const auto ret = ZSTD_compressStream2( m_streamZstd, &out, &in, ZSTD_e_flush );
+            [[maybe_unused]] const auto ret = ZSTD_compressStream2( m_streamZstd, &out, &in, ZSTD_e_flush );
             assert( ret == 0 );
             m_size = out.pos;
         }

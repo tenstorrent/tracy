@@ -88,8 +88,9 @@ struct GpuCtxWrapper
 TRACY_API moodycamel::ConcurrentQueue<QueueItem>::ExplicitProducer* GetToken();
 TRACY_API Profiler& MANGLED_NAME_BASED_ON_CONFIG(GetProfiler)();
 tracy_force_inline Profiler& GetProfiler() { return MANGLED_NAME_BASED_ON_CONFIG(GetProfiler)(); }
+TRACY_API int64_t GetInitTime();
 TRACY_API std::atomic<uint32_t>& GetLockCounter();
-TRACY_API std::atomic<uint8_t>& GetGpuCtxCounter();
+TRACY_API std::atomic<uint16_t>& GetGpuCtxCounter();
 TRACY_API GpuCtxWrapper& GetGpuCtx();
 TRACY_API uint32_t GetThreadHandle();
 TRACY_API bool ProfilerAvailable();
@@ -856,7 +857,7 @@ public:
         return AllocSourceLocation( line, source, sourceSz, function, functionSz, nullptr, 0, color );
     }
 
-    static tracy_force_inline uint64_t AllocSourceLocation( uint32_t line, const char* source, size_t sourceSz, const char* function, size_t functionSz, const char* name, size_t nameSz, uint32_t color = 0 )
+    static tracy_force_inline uint64_t AllocSourceLocation( uint32_t line, const char* source, size_t sourceSz, const char* function, size_t functionSz, const char* name, size_t nameSz, uint32_t color )
     {
         const auto sz32 = uint32_t( 2 + 4 + 4 + functionSz + 1 + sourceSz + 1 + nameSz );
         assert( sz32 <= (std::numeric_limits<uint16_t>::max)() );
@@ -875,6 +876,8 @@ public:
         }
         return uint64_t( ptr );
     }
+
+    double m_timerMul;
 
 private:
     enum class DequeueStatus { DataDequeued, ConnectionLost, QueueEmpty };
@@ -1042,7 +1045,6 @@ private:
     static int64_t GetTimeQpc();
 #endif
 
-    double m_timerMul;
     uint64_t m_resolution;
     std::atomic<int64_t> m_timeBegin;
     uint32_t m_mainThread;

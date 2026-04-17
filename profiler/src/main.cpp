@@ -15,8 +15,20 @@
 #include <sys/stat.h>
 #include <locale.h>
 
+
 #ifdef _WIN32
 #  include <windows.h>
+#endif
+
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+extern "C" {
+    int getTraceCount();
+    const char* getTraceName(int idx);
+    void fetchAndWriteTrace(int idx);
+    void deleteTrace(const char*);
+    void downloadTrace(const char*);
+}
 #endif
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -586,6 +598,8 @@ static void DrawContents()
         ImGui::PushFont( g_fonts.bold, FontNormal * 1.6f );
         tracy::TextCentered( buf );
         ImGui::PopFont();
+
+
         if( dpiChanged == 0 )
         {
             ImGui::SameLine( ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize( ICON_FA_WRENCH ).x );
@@ -747,6 +761,63 @@ static void DrawContents()
             ImGui::PopFont();
             ImGui::EndPopup();
         }
+
+// --- Trace selection UI for WASM ---
+#ifdef __EMSCRIPTEN__
+        ImGui::Spacing();
+        ImGui::Separator();
+        static int selectedTrace = 0;
+        int traceCount = getTraceCount();
+        if (traceCount > 0) {
+            // Shorten trace names for display
+            static std::vector<std::string> shortNames;
+            static std::vector<const char*> shortNamePtrs;
+            shortNames.clear();
+            shortNamePtrs.clear();
+            for (int i = 0; i < traceCount; ++i) {
+                const char* fullName = getTraceName(i);
+                std::string s(fullName);
+                // Shorten: keep only the part after last '/' or '\', and trim to 32 chars max
+                size_t lastSlash = s.find_last_of("/\\");
+                if (lastSlash != std::string::npos && lastSlash + 1 < s.size()) {
+                    s = s.substr(lastSlash + 1);
+                }
+                // Remove .tracy extension if present
+                size_t ext = s.rfind(".tracy");
+                if (ext != std::string::npos && ext == s.size() - 6) {
+                    s = s.substr(0, ext);
+                }
+                if (s.size() > 64) {
+                    s = s.substr(0, 30) + "..." + s.substr(s.size() - 28);
+                }
+                shortNames.push_back(std::move(s));
+            }
+            for (auto& sn : shortNames) shortNamePtrs.push_back(sn.c_str());
+
+
+            ImGui::Text("Runs");
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+            ImGui::PushFont(g_fonts.mono, FontNormal);
+            ImGui::Combo("##tracelist", &selectedTrace, shortNamePtrs.data(), traceCount);
+            ImGui::PopFont();
+
+            ImGui::Spacing();
+            if (ImGui::Button(ICON_FA_EYE " View")) {
+                fetchAndWriteTrace(selectedTrace);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button(ICON_FA_DOWNLOAD " Download")) {
+                downloadTrace(getTraceName(selectedTrace));
+            }
+            ImGui::SameLine();
+            if (ImGui::Button(ICON_FA_TRASH " Delete")) {
+                deleteTrace(getTraceName(selectedTrace));
+            }
+        } else {
+            ImGui::Text("No traces found.");
+        }
+        ImGui::Separator();
+#endif
         ImGui::Spacing();
         if( ImGui::Button( ICON_FA_BOOK " Manual" ) )
         {
