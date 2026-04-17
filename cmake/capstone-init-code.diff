@@ -1,0 +1,13 @@
+diff --git a/arch/ARM/ARMDisassembler.c b/arch/ARM/ARMDisassembler.c
+index 6deb046..c844c0d 100644
+--- a/arch/ARM/ARMDisassembler.c
++++ b/arch/ARM/ARMDisassembler.c
+@@ -6807,7 +6807,7 @@ static DecodeStatus DecodeRestrictedSPredicateOperand(MCInst *Inst,
+ 						      uint64_t Address,
+ 						      const void *Decoder)
+ {
+-	unsigned Code;
++	unsigned Code = 0;
+ 	switch (Val & 0x3) {
+ 	case 0:
+ 		Code = ARMCC_GE;

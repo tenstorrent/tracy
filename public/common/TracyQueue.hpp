@@ -492,7 +492,8 @@ enum class GpuContextType : uint8_t
     Metal,
     Custom,
     CUDA,
-    Rocprof
+    Rocprof,
+    tt_device
 };
 
 enum GpuContextFlags : uint8_t
@@ -506,7 +507,7 @@ struct QueueGpuNewContext
     int64_t gpuTime;
     uint32_t thread;
     float period;
-    uint8_t context;
+    uint16_t context;
     GpuContextFlags flags;
     GpuContextType type;
 };
@@ -516,7 +517,7 @@ struct QueueGpuZoneBeginLean
     int64_t cpuTime;
     uint32_t thread;
     uint16_t queryId;
-    uint8_t context;
+    uint16_t context;
 };
 
 struct QueueGpuZoneBegin : public QueueGpuZoneBeginLean
@@ -529,7 +530,7 @@ struct QueueGpuZoneEnd
     int64_t cpuTime;
     uint32_t thread;
     uint16_t queryId;
-    uint8_t context;
+    uint16_t context;
 };
 
 struct QueueGpuZoneAnnotation
@@ -545,7 +546,7 @@ struct QueueGpuTime
 {
     int64_t gpuTime;
     uint16_t queryId;
-    uint8_t context;
+    uint16_t context;
 };
 
 struct QueueGpuCalibration
@@ -553,19 +554,19 @@ struct QueueGpuCalibration
     int64_t gpuTime;
     int64_t cpuTime;
     int64_t cpuDelta;
-    uint8_t context;
+    uint16_t context;
 };
 
 struct QueueGpuTimeSync
 {
     int64_t gpuTime;
     int64_t cpuTime;
-    uint8_t context;
+    uint16_t context;
 };
 
 struct QueueGpuContextName
 {
-    uint8_t context;
+    uint16_t context;
 };
 
 struct QueueGpuContextNameFat : public QueueGpuContextName
