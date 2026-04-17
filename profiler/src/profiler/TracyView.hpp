@@ -49,7 +49,8 @@ constexpr const char* GpuContextNames[] = {
     "Metal",
     "Custom",
     "CUDA",
-    "Rocprof"
+    "Rocprof",
+    "TT Device"
 };
 
 struct MemoryPage;
@@ -286,6 +287,7 @@ private:
     void DrawPlotPoint( const ImVec2& wpos, float x, float y, int offset, uint32_t color, bool hover, bool hasPrev, const PlotItem& item, double prev, PlotType type, PlotValueFormatting format, float PlotHeight, uint64_t name );
     void DrawPlotPoint( const ImVec2& wpos, float x, float y, int offset, uint32_t color, bool hover, double val, PlotValueFormatting format, float PlotHeight );
     void DrawOptions();
+    const char* GetGpuContextLabel( const GpuCtxData* gpu );
     void DrawMessages();
     void DrawMessageLine( const MessageData& msg, bool hasCallstack, int& idx );
     void DrawFindZone();
@@ -543,6 +545,7 @@ private:
         }
     };
     MessageFilter m_messageFilter;
+    char m_gpuFilterBuf[256] = {};
     bool m_showMessageImages = false;
     int m_visibleMessages = 0;
     int m_messagesPerSeverity[(size_t)MessageSeverity::COUNT] = {};

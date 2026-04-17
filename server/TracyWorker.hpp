@@ -1036,7 +1036,7 @@ private:
     bool m_inconsistentSamples;
     bool m_allowStringModification = false;
 
-    short_ptr<GpuCtxData> m_gpuCtxMap[256];
+    short_ptr<GpuCtxData> m_gpuCtxMap[65536];
     uint32_t m_pendingCallstackId = 0;
     int16_t m_pendingSourceLocationPayload = 0;
     Vector<uint64_t> m_sourceLocationQueue;

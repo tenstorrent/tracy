@@ -6992,7 +6992,6 @@ void Worker::ProcessThreadWakeup( const QueueThreadWakeup& ev )
         // So instead of dropping the information, keep the last one around so that we
         // may fetch it once the thread actually switches out.
         // We rely on the fact we won't get another one in the meantime.
-        auto& item = data.back();
         it->second->pendingWakeUp.time = time;
         it->second->pendingWakeUp.cpu = ev.cpu;
         return;
