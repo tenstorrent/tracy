@@ -89,9 +89,6 @@ Args parse_args(int argc, char** argv)
         case 'h':
             print_usage_exit(0);
             break;
-        case 'V':
-            printf( "tracy-csvexport %i.%i.%i / %s\n", tracy::Version::Major, tracy::Version::Minor, tracy::Version::Patch, tracy::GitRef );
-            exit( 0 );
         case 'f':
             args.filter = optarg;
             break;
@@ -121,9 +118,6 @@ Args parse_args(int argc, char** argv)
             break;
         case 'p':
             args.plot = true;
-            break;
-        case 't':
-            args.truncated_mean_percentile = std::clamp<int>(optarg ? std::atoi(optarg) : 90, 1, 99);
             break;
         default:
             print_usage_exit(1);
@@ -184,6 +178,49 @@ std::string join(const T& v, const char* sep) {
         s << i;
     }
     return s.str();
+}
+
+// Returns {pN, truncated_mean}
+std::pair<int64_t, int64_t> percentile_and_truncated_mean(std::vector<int64_t>& data, const double p)
+{
+    assert(p >= 0.0 && p <= 1.0);
+
+    if (data.empty()) {
+        return {0, 0};
+    }
+
+    std::sort(data.begin(), data.end());
+
+    const std::size_t n = data.size();
+    const double idx = p * (static_cast<double>(n) - 1.0);
+    const std::size_t idxLow = static_cast<std::size_t>(std::floor(idx));
+    const std::size_t idxHigh = std::min(idxLow + 1, n - 1);
+    const double frac = idx - static_cast<double>(idxLow);
+
+    const double low = static_cast<double>(data[idxLow]);
+    const double high = static_cast<double>(data[idxHigh]);
+
+    const double pval_double = low + (high - low) * frac;
+    const int64_t pval_int = static_cast<int64_t>(std::llround(pval_double));
+
+    int64_t sum = 0;
+    std::size_t count = 0;
+    for (std::size_t i = 0; i < n; ++i) {
+        if (static_cast<double>(data[i]) <= pval_double) {
+            sum += data[i];
+            ++count;
+        } else {
+            break;
+        }
+    }
+
+    if (count == 0) {
+        return {pval_int, 0};
+    }
+
+    const int64_t truncated_mean = sum / count;
+
+    return {pval_int, truncated_mean};
 }
 
 //From TracyView_Utility.cpp
