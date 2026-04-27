@@ -279,7 +279,8 @@ endif()
 if(EMSCRIPTEN)
     # Add JS glue for multi-trace support
     set(TRACY_TRACES_JS ${CMAKE_CURRENT_LIST_DIR}/wasm/tracy_traces.js)
-    target_link_options(${PROJECT_NAME} PRIVATE -pthread -sASSERTIONS=0 -sINITIAL_MEMORY=384mb -sALLOW_MEMORY_GROWTH=1 -sMAXIMUM_MEMORY=4gb -sSTACK_SIZE=1048576 -sWASM_BIGINT=1 -sPTHREAD_POOL_SIZE=8 -sEXPORTED_FUNCTIONS=_main,_nativeOpenFile,_tracy_paste_clipboard -sEXPORTED_RUNTIME_METHODS=ccall -sENVIRONMENT=web,worker --js-library=${TRACY_TRACES_JS})
+    # -pthread + ALLOW_MEMORY_GROWTH is intentional (threads + large traces); em++ warns by default.
+    target_link_options(${PROJECT_NAME} PRIVATE -pthread -Wno-pthreads-mem-growth -sASSERTIONS=0 -sINITIAL_MEMORY=384mb -sALLOW_MEMORY_GROWTH=1 -sMAXIMUM_MEMORY=4gb -sSTACK_SIZE=1048576 -sWASM_BIGINT=1 -sPTHREAD_POOL_SIZE=8 -sEXPORTED_FUNCTIONS=_main,_nativeOpenFile,_tracy_paste_clipboard -sEXPORTED_RUNTIME_METHODS=ccall -sENVIRONMENT=web,worker --js-library=${TRACY_TRACES_JS})
 
     file(COPY ${CMAKE_CURRENT_LIST_DIR}/wasm/index.html DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
     file(COPY ${CMAKE_CURRENT_LIST_DIR}/wasm/httpd.py DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
