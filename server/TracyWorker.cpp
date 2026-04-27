@@ -263,8 +263,8 @@ Worker::Worker( const char* addr, uint16_t port, int64_t memoryLimit )
     , m_buffer( new char[TargetFrameSize*3 + 1] )
     , m_bufferOffset( 0 )
     , m_inconsistentSamples( false )
-    , m_memoryLimit( memoryLimit )
     , m_callstackFrameStaging( nullptr )
+    , m_memoryLimit( memoryLimit )
     , m_traceVersion( CurrentVersion )
     , m_loadTime( 0 )
 {
@@ -549,8 +549,8 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks, bool allow
     , m_stream( nullptr )
     , m_buffer( nullptr )
     , m_inconsistentSamples( false )
-    , m_memoryLimit( -1 )
     , m_allowStringModification( allowStringModification )
+    , m_memoryLimit( -1 )
 {
     auto loadStart = std::chrono::high_resolution_clock::now();
 
@@ -3914,7 +3914,7 @@ void Worker::AddSymbolCode( uint64_t ptr, const char* data, size_t sz )
     m_data.symbolCodeSize += sz;
 
     if( m_data.cpuArch == CpuArchUnknown ) return;
-    csh handle;
+    csh handle{};
     cs_err rval = CS_ERR_ARCH;
     switch( m_data.cpuArch )
     {
@@ -5423,8 +5423,7 @@ void Worker::ProcessZoneValue( const QueueZoneValue& ev )
 
 void Worker::ProcessLockAnnounce( const QueueLockAnnounce& ev )
 {
-    auto it = m_data.lockMap.find( ev.id );
-    assert( it == m_data.lockMap.end() );
+    assert( m_data.lockMap.find( ev.id ) == m_data.lockMap.end() );
     auto lm = m_slab.AllocInit<LockMap>();
     lm->srcloc = ShrinkSourceLocation( ev.lckloc );
     lm->type = ev.type;
@@ -8328,7 +8327,7 @@ void Worker::Write( FileWrite& f, bool fiDict )
 
     sz = m_data.callstackFrameMap.size() - m_pendingCallstackFrames;
     f.Write( &sz, sizeof( sz ) );
-    uint64_t check = 0;
+    uint64_t written = 0;
     for( auto& frame : m_data.callstackFrameMap )
     {
         if( !frame.second ) continue;
@@ -8336,9 +8335,10 @@ void Worker::Write( FileWrite& f, bool fiDict )
         f.Write( &frame.second->size, sizeof( frame.second->size ) );
         f.Write( &frame.second->imageName, sizeof( frame.second->imageName ) );
         f.Write( frame.second->data, sizeof( CallstackFrame ) * frame.second->size );
-        check++;
+        ++written;
     }
-    assert( check == sz );
+    assert( written == sz );
+    (void)written;
 
     sz = m_data.appInfo.size();
     f.Write( &sz, sizeof( sz ) );
