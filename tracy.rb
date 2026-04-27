@@ -6,6 +6,10 @@ class Tracy < Formula
   license "BSD-3-Clause"
   revision 1
 
+  # Enables `brew install --HEAD user/tracy/tracy` to build from git instead of the tarball.
+  # Omit `branch:` to follow the repository default branch; add `, branch: "your-feature"` to pin.
+  head "https://github.com/tenstorrent-metal/tracy.git"
+
   depends_on "pkg-config" => :build
   depends_on "capstone"
   depends_on "freetype"
