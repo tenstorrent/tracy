@@ -226,8 +226,7 @@ void RefreshDisplay( const std::string& listenAddr )
                 float mbps = session->stats.mbps.load();
                 int64_t tx = session->stats.txBytes.load();
                 int64_t mem = session->stats.memUsage.load();
-                int64_t firstTime = session->stats.firstTime.load();
-                
+
                 printf( "%.1f Mbps | %s | %s", mbps, tracy::MemSizeToString( tx ), tracy::MemSizeToString( mem ) );
                 
                 totalMbps += mbps;

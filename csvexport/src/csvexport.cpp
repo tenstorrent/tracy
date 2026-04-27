@@ -373,12 +373,10 @@ int main(int argc, char** argv)
         tracy::Vector<decltype( gpu_slz.begin() )> gpu_slz_selected;
         gpu_slz_selected.reserve( gpu_slz.size() );
 
-        uint32_t total_cnt = 0;
         for (auto it = gpu_slz.begin(); it != gpu_slz.end(); ++it)
         {
             if (it->second.total != 0)
             {
-                ++total_cnt;
                 if (args.filter[0] == '\0')
                 {
                     gpu_slz_selected.push_back_no_space_check( it );
@@ -435,12 +433,10 @@ int main(int argc, char** argv)
     slz_selected.reserve(slz.size());
     slzg_selected.reserve(slzg.size());
 
-    uint32_t total_cnt = 0;
     for(auto it = slz.begin(); it != slz.end(); ++it)
     {
         if(it->second.total != 0)
         {
-            ++total_cnt;
             if(args.filter[0] == '\0')
             {
                 slz_selected.push_back_no_space_check(it);
