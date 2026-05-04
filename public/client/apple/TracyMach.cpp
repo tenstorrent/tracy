@@ -21,7 +21,6 @@ namespace tracy
 static std::atomic<bool> s_traceActive { false };
 static mach_timebase_info_data_t s_timebase;
 static int s_samplingHz;
-static pthread_t s_watchdogThread;
 
 static void SysTraceEmitCallstackSample( uint32_t threadId, int64_t timestamp, const uint64_t* frames, int depth )
 {
@@ -205,21 +204,12 @@ bool SysTraceStart( int64_t& samplingPeriod )
     mach_timebase_info( &s_timebase );
     s_samplingHz   = GetSamplingFrequency();
     samplingPeriod = SamplingFrequencyToPeriodNs( s_samplingHz );
-    auto trampoline = []( void* ) -> void* { SysTraceWorker( nullptr ); return nullptr; };
-    if( pthread_create( &s_watchdogThread, nullptr, trampoline, nullptr ) != 0 )
-    {
-        s_traceActive.store( false, std::memory_order_relaxed );
-        return false;
-    }
     return true;
 }
 
 void SysTraceStop()
 {
-    bool expected = true;
-    if( !s_traceActive.compare_exchange_strong( expected, false, std::memory_order_relaxed ) )
-        return;
-    pthread_join( s_watchdogThread, nullptr );
+    s_traceActive.store( false, std::memory_order_relaxed );
 }
 
 void SysTraceGetExternalName( uint64_t thread, const char*& threadName, const char*& name )
