@@ -3,6 +3,7 @@
 #include <atomic>
 #include <mach/mach.h>
 #include <mach/mach_time.h>
+#include <ptrauth.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,15 +47,13 @@ static int SysTraceBacktrace( uint64_t* frames, int maxDepth, uint64_t pc, uint6
 
     // NOTE: frame-pointer walk for now... It should be fine since the ABI
     // mandates it on ARM64 (and on x64 Apple clang preserves it by default)
-    // ALSO: on ARM64 with PAC, return addresses on the stack may be signed!
-    // (can strip auth bits via arm_thread_state64_get_lr() when needed)
     auto framePtr = (const uint64_t*)fp;
     while( framePtr && depth < maxDepth )
     {
         if( (uintptr_t)framePtr & (sizeof(uint64_t) - 1) ) break;  // misaligned — stop walk
         // [framePtr + 0] = saved frame pointer (previous frame)
-        // [framePtr + 1] = return address (PC of caller)
-        frames[depth++] = framePtr[1];
+        // [framePtr + 1] = return address, may be PAC-signed on ARM64
+        frames[depth++] = (uint64_t)ptrauth_strip( (void*)framePtr[1], ptrauth_key_return_address );
         framePtr = (const uint64_t*)framePtr[0];
     }
 
