@@ -10,6 +10,8 @@
 #    define TRACY_SAMPLING_HZ 8000
 #  elif defined __linux__
 #    define TRACY_SAMPLING_HZ 10000
+#  elif defined __APPLE__
+#    define TRACY_SAMPLING_HZ 1000
 #  endif
 #endif
 
@@ -1578,6 +1580,10 @@ void SysTraceGetExternalName( uint64_t thread, const char*& threadName, const ch
 }
 
 }
+
+#  elif defined __APPLE__
+
+#    include "apple/TracyMach.cpp"
 
 #  endif
 
