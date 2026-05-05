@@ -1,4 +1,8 @@
-// Included by TracySysTrace.cpp
+// (this file gets included by TracySysTrace.cpp)
+
+#ifndef __APPLE__
+#error this file can only be compiled for Apple targets
+#endif
 
 #include <atomic>
 #include <mach/mach.h>
@@ -13,8 +17,6 @@
 #include "../TracyProfiler.hpp"
 #include "../TracyStringHelpers.hpp"
 #include "../TracyThread.hpp"
-
-#include "../../tracy/Tracy.hpp"
 
 namespace tracy
 {
@@ -101,7 +103,6 @@ static void SysTraceSampleThread( mach_port_t tid )
 
 static void SysTraceWait( uint64_t deadline )
 {
-    ZoneScopedC(tracy::Color::DimGray);
     mach_wait_until( deadline );
 }
 
@@ -133,8 +134,6 @@ static void SysTraceWatch( mach_port_t selfThread )
     {
         SysTraceWait(deadline);
         deadline = mach_absolute_time() + periodMach;
-
-        ZoneScoped;
 
 #ifdef TRACY_ON_DEMAND
         if( !GetProfiler().IsConnected() ) continue;
@@ -179,9 +178,6 @@ static void SysTraceWatch( mach_port_t selfThread )
             mach_port_deallocate( mach_task_self(), threads[i] );
         vm_deallocate( mach_task_self(), (vm_address_t)threads, sizeof(thread_t) * threadCount );
     }
-
-    ZoneScopedNC("OUT", tracy::Color::Crimson);
-    std::this_thread::sleep_for( std::chrono::milliseconds(100) );
 }
 
 void SysTraceWorker( void* )
