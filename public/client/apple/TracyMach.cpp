@@ -22,7 +22,6 @@ namespace tracy
 {
 
 static std::atomic<bool> s_traceActive { false };
-static mach_timebase_info_data_t s_timebase;
 static int s_samplingHz;
 
 static void SysTraceEmitCallstackSample( uint32_t threadId, int64_t timestamp, const uint64_t* frames, int depth )
@@ -119,10 +118,13 @@ static uint32_t SysTraceRngNext( uint64_t& rng, uint32_t range )
     return (uint32_t)( rng % range );
 }
 
-static void SysTraceWatch( mach_port_t selfThread )
+static void SysTraceWatch()
 {
+    const mach_port_t selfThread = mach_thread_self();
+    mach_timebase_info_data_t timebase;
+    mach_timebase_info( &timebase );
     const uint64_t samplingPeriodNs = 1000000000ULL / s_samplingHz;
-    const uint64_t periodMach = samplingPeriodNs * s_timebase.denom / s_timebase.numer;
+    const uint64_t periodMach = samplingPeriodNs * timebase.denom / timebase.numer;
 
     std::vector<mach_port_t> runningThreads;
     std::vector<mach_port_t> waitingThreads;
@@ -178,6 +180,7 @@ static void SysTraceWatch( mach_port_t selfThread )
             mach_port_deallocate( mach_task_self(), threads[i] );
         vm_deallocate( mach_task_self(), (vm_address_t)threads, sizeof(thread_t) * threadCount );
     }
+    mach_port_deallocate( mach_task_self(), selfThread );
 }
 
 void SysTraceWorker( void* )
@@ -185,18 +188,21 @@ void SysTraceWorker( void* )
     ThreadExitHandler threadExitHandler;
     SetThreadName( "Tracy Mach Watchdog" );
     InitRpmalloc();
-    const mach_port_t selfThread = mach_thread_self();
-    SysTraceWatch( selfThread );
-    mach_port_deallocate( mach_task_self(), selfThread );
+    SysTraceWatch();
 }
 
 bool SysTraceStart( int64_t& samplingPeriod )
 {
+    // check for elevated privileges
+    // (technically, since this is a software-based user-mode sampling, elevated
+    // privileges are unnecessary, but doing so keeps the behavior consistent with
+    // the system tracing in other platforms)
+    if( geteuid() != 0 ) return false;
+
     bool expected = false;
     if( !s_traceActive.compare_exchange_strong( expected, true, std::memory_order_relaxed ) )
         return false;
 
-    mach_timebase_info( &s_timebase );
     s_samplingHz   = GetSamplingFrequency();
     samplingPeriod = SamplingFrequencyToPeriodNs( s_samplingHz );
     return true;
