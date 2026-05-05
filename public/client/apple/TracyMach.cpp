@@ -21,8 +21,16 @@
 namespace tracy
 {
 
-static std::atomic<bool> s_traceActive { false };
-static int s_samplingHz;
+struct SysTraceApple
+{
+    std::atomic<bool> active { false };
+    int samplingHz = 1000;
+    static SysTraceApple& Get()
+    {
+        static SysTraceApple systrace = {};
+        return systrace;
+    }
+};
 
 static void SysTraceEmitCallstackSample( uint32_t threadId, int64_t timestamp, const uint64_t* frames, int depth )
 {
@@ -120,10 +128,12 @@ static uint32_t SysTraceRngNext( uint64_t& rng, uint32_t range )
 
 static void SysTraceWatch()
 {
+    auto& systrace = SysTraceApple::Get();
+
     const mach_port_t selfThread = mach_thread_self();
     mach_timebase_info_data_t timebase;
     mach_timebase_info( &timebase );
-    const uint64_t samplingPeriodNs = 1000000000ULL / s_samplingHz;
+    const uint64_t samplingPeriodNs = 1000000000ULL / systrace.samplingHz;
     const uint64_t periodMach = samplingPeriodNs * timebase.denom / timebase.numer;
 
     std::vector<mach_port_t> runningThreads;
@@ -132,7 +142,7 @@ static void SysTraceWatch()
     uint64_t rng = SysTraceRngInit();
 
     uint64_t deadline = mach_absolute_time();
-    while( s_traceActive.load( std::memory_order_relaxed ) )
+    while( systrace.active.load( std::memory_order_relaxed ) )
     {
         SysTraceWait(deadline);
         deadline = mach_absolute_time() + periodMach;
@@ -199,18 +209,21 @@ bool SysTraceStart( int64_t& samplingPeriod )
     // the system tracing in other platforms)
     if( geteuid() != 0 ) return false;
 
+    auto& systrace = SysTraceApple::Get();
+
     bool expected = false;
-    if( !s_traceActive.compare_exchange_strong( expected, true, std::memory_order_relaxed ) )
+    if( !systrace.active.compare_exchange_strong( expected, true, std::memory_order_relaxed ) )
         return false;
 
-    s_samplingHz   = GetSamplingFrequency();
-    samplingPeriod = SamplingFrequencyToPeriodNs( s_samplingHz );
+    systrace.samplingHz = GetSamplingFrequency();
+    samplingPeriod      = SamplingFrequencyToPeriodNs( systrace.samplingHz );
     return true;
 }
 
 void SysTraceStop()
 {
-    s_traceActive.store( false, std::memory_order_relaxed );
+    auto& systrace = SysTraceApple::Get();
+    systrace.active.store( false, std::memory_order_relaxed );
 }
 
 void SysTraceGetExternalName( uint64_t thread, const char*& threadName, const char*& name )
