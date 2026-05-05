@@ -120,8 +120,8 @@ static uint32_t SysTraceRngNext( uint64_t& rng, uint32_t range )
 
 static void SysTraceWatch( mach_port_t selfThread )
 {
-    const uint64_t periodNs   = 1'000'000'000ULL / s_samplingHz;
-    const uint64_t periodMach = periodNs * s_timebase.denom / s_timebase.numer;
+    const uint64_t samplingPeriodNs = 1000000000ULL / s_samplingHz;
+    const uint64_t periodMach = samplingPeriodNs * s_timebase.denom / s_timebase.numer;
 
     std::vector<mach_port_t> runningThreads;
     std::vector<mach_port_t> waitingThreads;
