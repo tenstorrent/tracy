@@ -98,6 +98,7 @@ struct TTDeviceMarker {
     static constexpr uint64_t CHIP_BIT_SHIFT = CORE_Y_BIT_SHIFT + CORE_Y_BIT_COUNT;
 
     static constexpr uint64_t INVALID_NUM = 1LL << 63;
+    static constexpr uint16_t INVALID_MARKER_ID = static_cast<uint16_t>(-1);
 
     static_assert((RISC_BIT_COUNT + CORE_X_BIT_COUNT + CORE_Y_BIT_COUNT + CHIP_BIT_COUNT) <= (sizeof(uint32_t) * 8));
 
@@ -129,7 +130,7 @@ struct TTDeviceMarker {
         core_x(INVALID_NUM),
         core_y(INVALID_NUM),
         risc(RiscType::BRISC),
-        marker_id(INVALID_NUM),
+        marker_id(INVALID_MARKER_ID),
         timestamp(INVALID_NUM),
         data(INVALID_NUM),
         op_name(""),
@@ -181,7 +182,7 @@ struct TTDeviceMarker {
         meta_data(meta_data) {}
 #endif
 
-    TTDeviceMarker(uint32_t threadID) : runtime_host_id(-1), marker_id(-1) {
+    TTDeviceMarker(uint32_t threadID) : runtime_host_id(-1), marker_id(INVALID_MARKER_ID) {
         risc = static_cast<RiscType>((threadID) & ((1 << RISC_BIT_COUNT) - 1));
         core_x = (threadID >> CORE_X_BIT_SHIFT) & ((1 << CORE_X_BIT_COUNT) - 1);
         core_y = (threadID >> CORE_Y_BIT_SHIFT) & ((1 << CORE_Y_BIT_COUNT) - 1);
