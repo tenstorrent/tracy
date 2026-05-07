@@ -302,7 +302,7 @@ int main(int argc, char** argv)
         return 0;
     }
 
-    while (!worker.AreSourceLocationZonesReady())
+    while (!worker.AreSourceLocationZonesReady() || !worker.AreGpuSourceLocationZonesReady())
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
@@ -314,12 +314,10 @@ int main(int argc, char** argv)
     slz_selected.reserve(slz.size());
     slzg_selected.reserve(slzg.size());
 
-    uint32_t total_cnt = 0;
     for(auto it = slz.begin(); it != slz.end(); ++it)
     {
         if(it->second.total != 0)
         {
-            ++total_cnt;
             if(args.filter[0] == '\0')
             {
                 slz_selected.push_back_no_space_check(it);
@@ -330,6 +328,28 @@ int main(int argc, char** argv)
                 if(is_substring(args.filter, name, args.case_sensitive))
                 {
                     slz_selected.push_back_no_space_check(it);
+                }
+            }
+        }
+    }
+
+    // Same pass for GPU source location zones (TT-device / Vulkan / OpenCL /
+    // CUDA zones).  Without this the GPU zones' iterator vector stays empty
+    // and nothing downstream reports them.
+    for(auto it = slzg.begin(); it != slzg.end(); ++it)
+    {
+        if(it->second.total != 0)
+        {
+            if(args.filter[0] == '\0')
+            {
+                slzg_selected.push_back_no_space_check(it);
+            }
+            else
+            {
+                auto name = get_name(it->first, worker);
+                if(is_substring(args.filter, name, args.case_sensitive))
+                {
+                    slzg_selected.push_back_no_space_check(it);
                 }
             }
         }
@@ -479,7 +499,6 @@ int main(int argc, char** argv)
 
         if (args.unwrap)
         {
-            int i = 0;
             for (const auto& zone_thread_data : zone_data.zones) {
                 const auto zone_event = zone_thread_data.Zone();
                 const auto tId = zone_thread_data.Thread();
@@ -497,6 +516,32 @@ int main(int argc, char** argv)
                 std::string row = join(values, args.separator);
                 printf("%s\n", row.data());
             }
+        }
+        else
+        {
+            const auto time = zone_data.total;
+            values[3] = std::to_string(time);
+            values[4] = std::to_string(100. * time / last_time);
+
+            values[5] = std::to_string(zone_data.zones.size());
+
+            const auto avg = zone_data.total / zone_data.zones.size();
+            values[6] = std::to_string(avg);
+
+            values[7] = std::to_string(zone_data.min);
+            values[8] = std::to_string(zone_data.max);
+
+            const auto sz = zone_data.zones.size();
+            const auto ss = zone_data.sumSq
+                - 2. * zone_data.total * avg
+                + avg * avg * sz;
+            double std = 0;
+            if( sz > 1 )
+                std = sqrt(ss / (sz - 1));
+            values[9] = std::to_string(std);
+
+            std::string row = join(values, args.separator);
+            printf("%s\n", row.data());
         }
     }
     return 0;
