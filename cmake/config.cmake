@@ -75,6 +75,19 @@ if(NOT NO_CCACHE)
     endif()
 endif()
 
+# Tracy tools use nested project(LANGUAGES C CXX). Clang on Linux often leaves
+# CMAKE_(C|CXX)_COMPILER_(AR|RANLIB) at *-NOTFOUND while CMAKE_AR / CMAKE_RANLIB are valid.
+# Ninja then embeds those placeholders in static-library rules; RULE_LAUNCH_LINK prefixes
+# them with ccache, which fails with "Could not find compiler ...-NOTFOUND".
+foreach(_tt_lang IN ITEMS C CXX)
+    if(CMAKE_${_tt_lang}_COMPILER_AR MATCHES "-NOTFOUND$")
+        set(CMAKE_${_tt_lang}_COMPILER_AR "${CMAKE_AR}")
+    endif()
+    if(CMAKE_${_tt_lang}_COMPILER_RANLIB MATCHES "-NOTFOUND$")
+        set(CMAKE_${_tt_lang}_COMPILER_RANLIB "${CMAKE_RANLIB}")
+    endif()
+endforeach()
+
 file(GENERATE OUTPUT .gitignore CONTENT "*")
 
 set(CMAKE_COLOR_DIAGNOSTICS ON)
