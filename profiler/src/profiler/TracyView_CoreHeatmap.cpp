@@ -1,4 +1,6 @@
 #include <algorithm>
+#include <array>
+#include <cfloat>
 #include <cmath>
 #include <cinttypes>
 #include <cstdio>
@@ -21,6 +23,29 @@ namespace
 {
 
 constexpr int MaxHeatmapGridDim = 128;
+constexpr int RiscBarCount = 5;
+
+static constexpr const char* RiscBarNames[RiscBarCount] = {
+    "BRISC", "NCRISC", "TRISC_0", "TRISC_1", "TRISC_2"
+};
+
+static float GetCoreHeatmapLegendBarHeight()
+{
+    return std::max( 6.f, ImGui::GetTextLineHeight() * 0.55f );
+}
+
+static float GetCoreHeatmapLegendRowsHeight()
+{
+    const float legendBarH = GetCoreHeatmapLegendBarHeight();
+    const float legendGap = 4.f;
+    return float( RiscBarCount ) * ( legendBarH + legendGap ) + 4.f;
+}
+
+static float GetCoreHeatmapFooterHeight()
+{
+    // Help line + RISC legend rows below the grid.
+    return ImGui::GetTextLineHeight() + 2.f + GetCoreHeatmapLegendRowsHeight();
+}
 
 struct CoreKey
 {
@@ -44,7 +69,8 @@ struct CoreKeyHash
 
 struct CoreCell
 {
-    std::vector<std::pair<int64_t, int64_t>> intervals;
+    std::array<std::vector<std::pair<int64_t, int64_t>>, RiscBarCount> riscIntervals;
+    std::array<int64_t, RiscBarCount> riscBusyNs {};
     int64_t busyNs = 0;
     uint32_t zoneCount = 0;
 };
@@ -55,6 +81,18 @@ struct DeviceGrid
     uint32_t sizeY = 0;
     bool valid = false;
 };
+
+static float ComputeCoreHeatmapCellSize( const DeviceGrid& grid, const ImVec2& avail, float scale )
+{
+    const float footerH = GetCoreHeatmapFooterHeight();
+    const float axisRowH = ImGui::GetTextLineHeight();
+    const float vertForCells = std::max( 32.f, avail.y - footerH - axisRowH );
+    const float horizForCells = std::max( 32.f, avail.x - 16.f );
+
+    return std::clamp(
+        std::min( horizForCells / ( float( grid.sizeX ) + 2.f ), vertForCells / ( float( grid.sizeY ) + 2.f ) ),
+        8.f * scale, 48.f * scale );
+}
 
 struct GpuTimelineWork
 {
@@ -128,6 +166,88 @@ static float GetCoreUtilization( const CoreCell& cell, int64_t spanNs )
     return std::clamp( float( cell.busyNs ) / float( spanNs ), 0.f, 1.f );
 }
 
+static float GetRiscUtilization( const CoreCell& cell, int riscBar, int64_t spanNs )
+{
+    if( riscBar < 0 || riscBar >= RiscBarCount || spanNs <= 0 ) return 0.f;
+    return std::clamp( float( cell.riscBusyNs[riscBar] ) / float( spanNs ), 0.f, 1.f );
+}
+
+static int RiscToBarIndex( RiscType risc )
+{
+    switch( risc )
+    {
+    case RiscType::BRISC: return 0;
+    case RiscType::NCRISC: return 1;
+    case RiscType::TRISC_0: return 2;
+    case RiscType::TRISC_1: return 3;
+    case RiscType::TRISC_2: return 4;
+    default: return -1;
+    }
+}
+
+// Color::ColorType values from TracyTTDevice::getMarkerColor (public/common/TracyColor.hpp).
+static constexpr uint32_t RiscTimelineColorRaw[RiscBarCount] = {
+    0xee9a00,  // Orange2 — BRISC
+    0x43cd80,  // SeaGreen3 — NCRISC
+    0x6ca6cd,  // SkyBlue3 — TRISC_0
+    0x00e5ee,  // Turquoise2 — TRISC_1
+    0x98f5ff,  // CadetBlue1 — TRISC_2
+};
+
+// Pack like Worker::AddSourceLocationPayload so bars match GPU timeline zone colors.
+static uint32_t PackTimelineColor( uint32_t color )
+{
+    const uint32_t packed =
+        ( ( color & 0x00FF0000 ) >> 16 ) |
+        ( ( color & 0x0000FF00 ) ) |
+        ( ( color & 0x000000FF ) << 16 );
+    return 0xFF000000 | packed;
+}
+
+static uint32_t RiscBarColor( int riscBar )
+{
+    if( riscBar < 0 || riscBar >= RiscBarCount ) return 0xFF555555;
+    return PackTimelineColor( RiscTimelineColorRaw[riscBar] );
+}
+
+static constexpr uint32_t kCellBg = 0xFF1E2028;
+
+static float UtilBarWidth( float util, float innerW, bool hasActivity )
+{
+    if( !hasActivity ) return 0.f;
+    return std::max( util * innerW, 1.f );
+}
+
+static int64_t MergeIntervals( std::vector<std::pair<int64_t, int64_t>>& iv )
+{
+    if( iv.empty() ) return 0;
+
+    std::sort( iv.begin(), iv.end(), [] ( const auto& a, const auto& b ) { return a.first < b.first; } );
+
+    int64_t total = 0;
+    int64_t curStart = iv.front().first;
+    int64_t curEnd = iv.front().second;
+
+    for( size_t i = 1; i < iv.size(); ++i )
+    {
+        if( iv[i].first <= curEnd )
+        {
+            curEnd = std::max( curEnd, iv[i].second );
+        }
+        else
+        {
+            total += curEnd - curStart;
+            curStart = iv[i].first;
+            curEnd = iv[i].second;
+        }
+    }
+    total += curEnd - curStart;
+
+    iv.clear();
+    iv.shrink_to_fit();
+    return total;
+}
+
 static int64_t GetGpuTimelineBegin( const GpuCtxData& gpu )
 {
     for( auto& td : gpu.threadData )
@@ -161,8 +281,10 @@ static int64_t GpuEndForSearch( const GpuEvent& ev, int64_t begin, int drift, in
     return AdjustGpuTime( end, begin, drift );
 }
 
-static void AddZoneInterval( CoreCell& cell, int64_t zoneStart, int64_t zoneEnd, int64_t tMin, int64_t tMax )
+static void AddZoneInterval(
+    CoreCell& cell, int riscBar, int64_t zoneStart, int64_t zoneEnd, int64_t tMin, int64_t tMax )
 {
+    if( riscBar < 0 || riscBar >= RiscBarCount ) return;
     if( zoneEnd < 0 ) zoneEnd = tMax;
     if( zoneStart >= zoneEnd ) return;
 
@@ -170,7 +292,7 @@ static void AddZoneInterval( CoreCell& cell, int64_t zoneStart, int64_t zoneEnd,
     const auto clipEnd = std::min( zoneEnd, tMax );
     if( clipStart >= clipEnd ) return;
 
-    cell.intervals.emplace_back( clipStart, clipEnd );
+    cell.riscIntervals[riscBar].emplace_back( clipStart, clipEnd );
     cell.zoneCount++;
 }
 
@@ -179,37 +301,20 @@ static void FinalizeCoreCells( unordered_flat_map<CoreKey, CoreCell, CoreKeyHash
     for( auto& kv : cells )
     {
         auto& cell = kv.second;
-        auto& iv = cell.intervals;
-        if( iv.empty() )
+        std::vector<std::pair<int64_t, int64_t>> combined;
+
+        for( int i = 0; i < RiscBarCount; ++i )
         {
-            cell.busyNs = 0;
-            continue;
+            combined.insert(
+                combined.end(), cell.riscIntervals[i].begin(), cell.riscIntervals[i].end() );
         }
 
-        std::sort( iv.begin(), iv.end(), [] ( const auto& a, const auto& b ) { return a.first < b.first; } );
+        cell.busyNs = MergeIntervals( combined );
 
-        int64_t total = 0;
-        int64_t curStart = iv.front().first;
-        int64_t curEnd = iv.front().second;
-
-        for( size_t i = 1; i < iv.size(); ++i )
+        for( int i = 0; i < RiscBarCount; ++i )
         {
-            if( iv[i].first <= curEnd )
-            {
-                curEnd = std::max( curEnd, iv[i].second );
-            }
-            else
-            {
-                total += curEnd - curStart;
-                curStart = iv[i].first;
-                curEnd = iv[i].second;
-            }
+            cell.riscBusyNs[i] = MergeIntervals( cell.riscIntervals[i] );
         }
-        total += curEnd - curStart;
-
-        cell.busyNs = total;
-        iv.clear();
-        iv.shrink_to_fit();
     }
 }
 
@@ -233,7 +338,7 @@ static void PushGpuChildren( Worker& worker, int32_t childIdx, std::vector<GpuTi
 
 template<typename Adapter, typename V>
 static void CollectGpuTimelineBusy(
-    Worker& worker, const V& vec, int64_t begin, int drift, int64_t tMin, int64_t tMax,
+    Worker& worker, const V& vec, int64_t begin, int drift, int64_t tMin, int64_t tMax, int riscBar,
     const CoreKey& key, unordered_flat_map<CoreKey, CoreCell, CoreKeyHash>& cells,
     std::vector<GpuTimelineWork>& stack )
 {
@@ -279,26 +384,26 @@ static void CollectGpuTimelineBusy(
         }
 
         const auto start = AdjustGpuTime( ev.GpuStart(), begin, drift );
-        AddZoneInterval( cell, start, end, tMin, tMax );
+        AddZoneInterval( cell, riscBar, start, end, tMin, tMax );
 
         ++it;
     }
 }
 
 static void ProcessGpuTimelineWork(
-    Worker& worker, const GpuTimelineWork& work, int64_t begin, int drift, int64_t tMin, int64_t tMax,
+    Worker& worker, const GpuTimelineWork& work, int64_t begin, int drift, int64_t tMin, int64_t tMax, int riscBar,
     const CoreKey& key, unordered_flat_map<CoreKey, CoreCell, CoreKeyHash>& cells,
     std::vector<GpuTimelineWork>& stack )
 {
     if( work.magicTimeline )
     {
         CollectGpuTimelineBusy<VectorAdapterDirect<GpuEvent>>(
-            worker, *work.magicTimeline, begin, drift, tMin, tMax, key, cells, stack );
+            worker, *work.magicTimeline, begin, drift, tMin, tMax, riscBar, key, cells, stack );
     }
     else if( work.ptrTimeline )
     {
         CollectGpuTimelineBusy<VectorAdapterPointer<GpuEvent>>(
-            worker, *work.ptrTimeline, begin, drift, tMin, tMax, key, cells, stack );
+            worker, *work.ptrTimeline, begin, drift, tMin, tMax, riscBar, key, cells, stack );
     }
 }
 
@@ -312,6 +417,10 @@ static void CollectGpuCtxBusy(
 
     for( auto& td : gpu.threadData )
     {
+        const TTDeviceMarker marker( uint32_t( td.first ) );
+        const auto riscBar = RiscToBarIndex( marker.risc );
+        if( riscBar < 0 ) continue;
+
         auto& tl = td.second.timeline;
         if( tl.empty() ) continue;
 
@@ -329,7 +438,7 @@ static void CollectGpuCtxBusy(
         {
             const auto work = stack.back();
             stack.pop_back();
-            ProcessGpuTimelineWork( worker, work, begin, drift, tMin, tMax, key, cells, stack );
+            ProcessGpuTimelineWork( worker, work, begin, drift, tMin, tMax, riscBar, key, cells, stack );
         }
     }
 }
@@ -457,6 +566,14 @@ static void DrawCoreHeatmapGrid(
 
     const auto chipId = cells.empty() ? 0 : cells.begin()->first.chipId;
 
+    const float pad = std::max( 1.f, cellSize * 0.08f );
+    const float barGap = std::max( 0.5f, cellSize * 0.04f );
+    const float innerW = cellSize - pad * 2.f;
+    const float innerH = cellSize - pad * 2.f;
+    const float aggBarH = std::max( 3.f, innerH * 0.24f );
+    const float riscAreaH = innerH - aggBarH - barGap;
+    const float barH = ( riscAreaH - barGap * float( RiscBarCount - 1 ) ) / float( RiscBarCount );
+
     CoreKey hoverKey {};
     bool hasHover = false;
     float hoverUtil = 0.f;
@@ -468,19 +585,43 @@ static void DrawCoreHeatmapGrid(
         {
             const CoreKey key { chipId, uint64_t( x ), uint64_t( y ) };
             const auto it = cells.find( key );
-            const float util = ( it != cells.end() ) ? GetCoreUtilization( it->second, spanNs ) : 0.f;
-            const auto color = HeatmapColor( util );
 
             const auto p0 = gridOrigin + ImVec2( x * cellSize, y * cellSize );
             const auto p1 = p0 + ImVec2( cellSize - 1, cellSize - 1 );
-            draw->AddRectFilled( p0, p1, color );
+            draw->AddRectFilled( p0, p1, kCellBg );
             draw->AddRect( p0, p1, 0x44FFFFFF );
+
+            if( it != cells.end() )
+            {
+                const auto& cell = it->second;
+                const float coreUtil = GetCoreUtilization( cell, spanNs );
+                const bool coreActive = cell.busyNs > 0;
+                const float coreBarW = UtilBarWidth( coreUtil, innerW, coreActive );
+                const auto aggY = p0.y + pad;
+                draw->AddRectFilled(
+                    ImVec2( p0.x + pad, aggY ),
+                    ImVec2( p0.x + pad + coreBarW, aggY + aggBarH ),
+                    HeatmapColor( coreUtil ) );
+
+                const auto riscBaseY = aggY + aggBarH + barGap;
+                for( int ri = 0; ri < RiscBarCount; ++ri )
+                {
+                    const float riscUtil = GetRiscUtilization( cell, ri, spanNs );
+                    const bool riscActive = cell.riscBusyNs[ri] > 0;
+                    const float barW = UtilBarWidth( riscUtil, innerW, riscActive );
+                    const auto barY = riscBaseY + float( ri ) * ( barH + barGap );
+                    draw->AddRectFilled(
+                        ImVec2( p0.x + pad, barY ),
+                        ImVec2( p0.x + pad + barW, barY + barH ),
+                        RiscBarColor( ri ) );
+                }
+            }
 
             if( ImGui::IsMouseHoveringRect( p0, p1 ) )
             {
                 hasHover = true;
                 hoverKey = key;
-                hoverUtil = util;
+                hoverUtil = ( it != cells.end() ) ? GetCoreUtilization( it->second, spanNs ) : 0.f;
                 hoverCell = it != cells.end() ? it->second : CoreCell {};
             }
         }
@@ -496,29 +637,41 @@ static void DrawCoreHeatmapGrid(
         ImGui::BeginTooltip();
         ImGui::TextUnformatted( hoverLabel );
         TextFocused( "Logical core (x, y):", coreBuf );
-        TextFocused( "Utilization:", utilBuf );
+        TextFocused( "Core utilization:", utilBuf );
         TextFocused( "Busy time:", TimeToString( hoverCell.busyNs ) );
         TextFocused( "Zones:", RealToString( hoverCell.zoneCount ) );
+        for( int ri = 0; ri < RiscBarCount; ++ri )
+        {
+            char riscLabel[32];
+            char riscBuf[32];
+            snprintf( riscLabel, sizeof( riscLabel ), "%s:", RiscBarNames[ri] );
+            snprintf(
+                riscBuf, sizeof( riscBuf ), "%.1f%%",
+                GetRiscUtilization( hoverCell, ri, spanNs ) * 100.f );
+            TextFocused( riscLabel, riscBuf );
+        }
         ImGui::EndTooltip();
     }
 
-    ImGui::Dummy( ImVec2( 0, 4 ) );
-    const auto legendY = ImGui::GetCursorScreenPos().y;
-    const auto legendW = 200.f;
-    const auto legendH = 12.f;
-    ImGui::Dummy( ImVec2( legendW, legendH + 4 ) );
-    const auto legendPos = ImVec2( ImGui::GetItemRectMin().x, legendY );
-    for( int i = 0; i < 64; i++ )
+    TextDisabledUnformatted( "Top bar = core utilization; lower bars = per-RISC utilization (timeline colors)" );
+
+    const float legendBarW = 48.f;
+    const float legendBarH = GetCoreHeatmapLegendBarHeight();
+    const float legendGap = 4.f;
+
+    ImGui::Dummy( ImVec2( std::max( gridW + cellSize * 2.f, legendBarW + 120.f ), GetCoreHeatmapLegendRowsHeight() ) );
+    const auto legendOrigin = ImGui::GetItemRectMin();
+
+    for( int ri = 0; ri < RiscBarCount; ++ri )
     {
-        const auto t = i / 63.f;
-        const auto x0 = legendPos.x + legendW * t;
-        const auto x1 = legendPos.x + legendW * ( i + 1 ) / 63.f;
-        draw->AddRectFilled( ImVec2( x0, legendPos.y ), ImVec2( x1, legendPos.y + legendH ), HeatmapColor( t ) );
+        const auto rowY = legendOrigin.y + float( ri ) * ( legendBarH + legendGap );
+        const auto rowPos = ImVec2( legendOrigin.x, rowY );
+        draw->AddRectFilled(
+            rowPos, rowPos + ImVec2( legendBarW, legendBarH ), RiscBarColor( ri ) );
+        draw->AddText(
+            rowPos + ImVec2( legendBarW + 6.f, rowY + ( legendBarH - ImGui::GetTextLineHeight() ) * 0.5f ),
+            0xFFCCCCCC, RiscBarNames[ri] );
     }
-    ImGui::SameLine();
-    ImGui::TextUnformatted( "0%" );
-    ImGui::SameLine( legendW - 32 );
-    ImGui::TextUnformatted( "100%" );
 }
 
 }  // namespace
@@ -526,8 +679,10 @@ static void DrawCoreHeatmapGrid(
 void View::DrawCoreHeatmap()
 {
     const auto scale = GetScale();
-    ImGui::SetNextWindowSize( ImVec2( 720 * scale, 520 * scale ), ImGuiCond_FirstUseEver );
-    ImGui::Begin( "Core activity", &m_showCoreHeatmap, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse );
+    ImGui::SetNextWindowSize( ImVec2( 760 * scale, 700 * scale ), ImGuiCond_FirstUseEver );
+    ImGui::SetNextWindowSizeConstraints(
+        ImVec2( 480 * scale, 420 * scale ), ImVec2( FLT_MAX, FLT_MAX ) );
+    ImGui::Begin( "Core activity", &m_showCoreHeatmap );
     if( ImGui::GetCurrentWindowRead()->SkipItems ) { ImGui::End(); return; }
 
     const int64_t tMin = m_vd.zvStart;
@@ -636,10 +791,7 @@ void View::DrawCoreHeatmap()
         else
         {
             const auto avail = ImGui::GetContentRegionAvail();
-            const auto cellSize = std::clamp(
-                std::min( ( avail.x - 40.f ) / grid.sizeX, ( avail.y - 80.f ) / grid.sizeY ),
-                8.f * scale, 48.f * scale );
-
+            const auto cellSize = ComputeCoreHeatmapCellSize( grid, avail, scale );
             DrawCoreHeatmapGrid( cells, grid, spanNs, cellSize, header );
         }
 
