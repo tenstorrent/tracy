@@ -621,6 +621,7 @@ public:
     const char* GetZoneName( const GpuEvent& ev ) const;
 
     tracy_force_inline const Vector<short_ptr<ZoneEvent>>& GetZoneChildren( int32_t idx ) const { return m_data.zoneChildren[idx]; }
+    tracy_force_inline size_t GetGpuChildrenCount() const { return m_data.gpuChildren.size(); }
     tracy_force_inline const Vector<short_ptr<GpuEvent>>& GetGpuChildren( int32_t idx ) const { return m_data.gpuChildren[idx]; }
 #ifndef TRACY_NO_STATISTICS
     tracy_force_inline const Vector<GhostZone>& GetGhostChildren( int32_t idx ) const { return m_data.ghostChildren[idx]; }

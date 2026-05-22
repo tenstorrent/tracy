@@ -930,6 +930,8 @@ bool View::DrawImpl()
     ImGui::SameLine();
     ToggleButton( ICON_FA_ARROW_UP_WIDE_SHORT " Statistics", m_showStatistics );
     ImGui::SameLine();
+    ToggleButton( ICON_FA_TABLE_CELLS " Cores", m_showCoreHeatmap );
+    ImGui::SameLine();
     ToggleButton( ICON_FA_FIRE_FLAME_CURVED " Flame", m_showFlameGraph );
     ImGui::SameLine();
     ToggleButton( ICON_FA_MEMORY " Memory", m_memInfo.show );
@@ -1170,6 +1172,7 @@ bool View::DrawImpl()
     if( m_showFlameGraph ) DrawFlameGraph();
     if( m_findZone.show ) DrawFindZone();
     if( m_showStatistics ) DrawStatistics();
+    if( m_showCoreHeatmap ) DrawCoreHeatmap();
     if( m_memInfo.show ) DrawMemory();
     if( m_memInfo.showAllocList ) DrawAllocList();
     if( m_compare.show ) DrawCompare();

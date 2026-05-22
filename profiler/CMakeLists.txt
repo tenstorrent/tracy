@@ -89,6 +89,7 @@ set(SERVER_FILES
     TracyView_Compare.cpp
     TracyView_ConnectionState.cpp
     TracyView_ContextSwitch.cpp
+    TracyView_CoreHeatmap.cpp
     TracyView_CpuData.cpp
     TracyView_FindZone.cpp
     TracyView_FlameGraph.cpp

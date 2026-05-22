@@ -299,6 +299,7 @@ private:
     void DrawFindZone();
     void AccumulationModeComboBox();
     void DrawStatistics();
+    void DrawCoreHeatmap();
     void DrawSamplesStatistics(Vector<SymList>& data, int64_t timeRange, AccumulationMode accumulationMode);
     void DrawMemory();
     void DrawAllocList();
@@ -582,6 +583,7 @@ private:
     bool m_showOptions = false;
     bool m_showMessages = false;
     bool m_showStatistics = false;
+    bool m_showCoreHeatmap = false;
     bool m_showInfo = false;
     bool m_showPlayback = false;
     bool m_showCpuDataWindow = false;
