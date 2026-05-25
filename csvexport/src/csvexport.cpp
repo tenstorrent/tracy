@@ -33,8 +33,8 @@ void print_usage_exit(int e)
     fprintf(stderr, "  -s, --sep arg     CSV separator (default: ,)\n");
     fprintf(stderr, "  -c, --case        Case sensitive filtering\n");
     fprintf(stderr, "  -e, --self        Get self times\n");
-    fprintf(stderr, "  -u, --unwrap      Report each cpu zone event\n");
-    fprintf(stderr, "  -g, --gpu         Report each gpu zone event\n" );
+    fprintf(stderr, "  -u, --unwrap      Report each zone event (CPU and GPU)\n");
+    fprintf(stderr, "  -g, --gpu         Report each gpu zone event\n");
     fprintf(stderr, "  -m, --messages    Report only messages\n");
     fprintf(stderr, "  -p, --plot        Report plot data (only with -u)\n");
 
@@ -63,11 +63,10 @@ Args parse_args(int argc, char** argv)
         print_usage_exit(1);
     }
 
-    Args args = { "", ",", "", "", "", false, false, false, false, false, false };
+    Args args = { "", ",", "", "", "", false, false, false, false, false, false, 0 };
 
     struct option long_opts[] = {
         { "help", no_argument, NULL, 'h' },
-        { "version", no_argument, NULL, 'V' },
         { "filter", optional_argument, NULL, 'f' },
         { "sep", optional_argument, NULL, 's' },
         { "case", no_argument, NULL, 'c' },
@@ -362,7 +361,7 @@ int main(int argc, char** argv)
         return 0;
     }
 
-    while (!worker.AreSourceLocationZonesReady())
+    while (!worker.AreSourceLocationZonesReady() || !worker.AreGpuSourceLocationZonesReady())
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
@@ -452,6 +451,28 @@ int main(int argc, char** argv)
         }
     }
 
+    // Same pass for GPU source location zones (TT-device / Vulkan / OpenCL /
+    // CUDA zones).  Without this the GPU zones' iterator vector stays empty
+    // and nothing downstream reports them.
+    for(auto it = slzg.begin(); it != slzg.end(); ++it)
+    {
+        if(it->second.total != 0)
+        {
+            if(args.filter[0] == '\0')
+            {
+                slzg_selected.push_back_no_space_check(it);
+            }
+            else
+            {
+                auto name = get_name(it->first, worker);
+                if(is_substring(args.filter, name, args.case_sensitive))
+                {
+                    slzg_selected.push_back_no_space_check(it);
+                }
+            }
+        }
+    }
+
     std::vector<std::string> specialFunctions = {};
     std::string specialParent = args.special_parent_function;
     if (specialParent.size() > 0)
@@ -472,7 +493,7 @@ int main(int argc, char** argv)
     if (args.unwrap)
     {
         columns = {
-            "name", "src_file", "src_line", "zone_name", "zone_text", "ns_since_start", "exec_time_ns", "thread", "value", "special_parent_text"
+            "name", "src_file", "src_line", "zone_name", "zone_text", "ns_since_start", "exec_time_ns", "thread", "special_parent_text"
         };
     }
     else
@@ -481,12 +502,6 @@ int main(int argc, char** argv)
             "name", "src_file", "src_line", "total_ns", "total_perc",
             "counts", "mean_ns", "min_ns", "max_ns", "std_ns"
         };
-
-        if(args.truncated_mean_percentile)
-        {
-            columns.push_back("percentile_ns");
-            columns.push_back("truncated_mean_ns");
-        }
     }
     std::string header = join(columns, args.separator);
     printf("%s\n", header.data());
@@ -569,11 +584,10 @@ int main(int argc, char** argv)
             values[3] = std::to_string(time);
             values[4] = std::to_string(100. * time / last_time);
 
-            const auto sz = zone_data.zones.size();
-            values[5] = std::to_string(sz);
+            values[5] = std::to_string(zone_data.zones.size());
 
-            const auto avg = time / sz;
-
+            const auto avg = (args.self_time ? zone_data.selfTotal : zone_data.total)
+                / zone_data.zones.size();
             values[6] = std::to_string(avg);
 
             const auto tmin = args.self_time ? zone_data.selfMin : zone_data.min;
@@ -581,6 +595,7 @@ int main(int argc, char** argv)
             values[7] = std::to_string(tmin);
             values[8] = std::to_string(tmax);
 
+            const auto sz = zone_data.zones.size();
             const auto ss = zone_data.sumSq
                 - 2. * zone_data.total * avg
                 + avg * avg * sz;
@@ -589,23 +604,65 @@ int main(int argc, char** argv)
                 std = sqrt(ss / (sz - 1));
             values[9] = std::to_string(std);
 
-            if(args.truncated_mean_percentile)
-            {
-                std::vector<int64_t> samples;
-                samples.reserve( zone_data.zones.size() );
-                for(const auto& zone_thread_data : zone_data.zones)
-                {
-                    const auto zone_event = zone_thread_data.Zone();
-                    auto timespan = zone_event->End() - zone_event->Start();
-                    if(args.self_time)
-                        timespan -= GetZoneChildTimeFast( worker, *zone_event );
-                    samples.push_back( timespan );
-                }
+            std::string row = join(values, args.separator);
+            printf("%s\n", row.data());
+        }
+    }
 
-                std::pair<int64_t, int64_t> pN = percentile_and_truncated_mean(samples, args.truncated_mean_percentile / 100.0);
-                values[10] = std::to_string(pN.first);
-                values[11] = std::to_string(pN.second);
+    for(auto& it : slzg_selected)
+    {
+        std::vector<std::string> values(columns.size());
+
+        values[0] = get_name(it->first, worker);
+
+        const auto& srcloc = worker.GetSourceLocation(it->first);
+        values[1] = worker.GetString(srcloc.file);
+        values[2] = std::to_string(srcloc.line);
+
+        const auto& zone_data = it->second;
+
+        if (args.unwrap)
+        {
+            for (const auto& zone_thread_data : zone_data.zones) {
+                const auto zone_event = zone_thread_data.Zone();
+                const auto tId = zone_thread_data.Thread();
+
+                const auto start = zone_event->GpuStart();
+                const auto end = zone_event->GpuEnd();
+
+                values[5] = std::to_string(start);
+
+                auto timespan = end - start;
+
+                values[6] = std::to_string(timespan);
+                values[7] = std::to_string(tId);
+
+                std::string row = join(values, args.separator);
+                printf("%s\n", row.data());
             }
+        }
+        else
+        {
+            const auto time = zone_data.total;
+            values[3] = std::to_string(time);
+            values[4] = std::to_string(100. * time / last_time);
+
+            values[5] = std::to_string(zone_data.zones.size());
+
+            const auto avg = zone_data.total / zone_data.zones.size();
+            values[6] = std::to_string(avg);
+
+            values[7] = std::to_string(zone_data.min);
+            values[8] = std::to_string(zone_data.max);
+
+            const auto sz = zone_data.zones.size();
+            const auto ss = zone_data.sumSq
+                - 2. * zone_data.total * avg
+                + avg * avg * sz;
+            double std = 0;
+            if( sz > 1 )
+                std = sqrt(ss / (sz - 1));
+            values[9] = std::to_string(std);
 
             std::string row = join(values, args.separator);
             printf("%s\n", row.data());
@@ -622,11 +679,8 @@ int main(int argc, char** argv)
 
             for(const auto& val : plot->data)
             {
-                if (args.unwrap)
-                {
-                    values[3] = std::to_string(val.time.Val());
-                    values[6] = std::to_string(val.val);
-                }
+                values[3] = std::to_string(val.time.Val());
+                values[6] = std::to_string(val.val);
                 std::string row = join(values, args.separator);
                 printf("%s\n", row.data());
             }

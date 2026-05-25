@@ -23,8 +23,9 @@ enum class RiscType : uint8_t {
     TRISC_1,
     TRISC_2,
     ERISC,
-    TENSIX_RISC_AGG  // TENSIX_RISC_AGG represents all the Tensix RISCs on device, but it itself isn't a RISC
-                     // defined on the device
+    TENSIX_RISC_AGG,  // TENSIX_RISC_AGG represents all the Tensix RISCs on device, but it itself isn't a RISC
+                      // defined on the device
+    NONE              // No RISC label displayed (used for host-side telemetry contexts)
 };
 
 enum class TTDeviceMarkerType : uint8_t { ZONE_START, ZONE_END, ZONE_TOTAL, TS_DATA, TS_EVENT, TS_DATA_16B };
@@ -120,6 +121,7 @@ struct TTDeviceMarker {
 #ifdef TRACY_TT_HAS_FULL_DEPS
     nlohmann::json meta_data;
 #endif
+    uint32_t color = 0;  // 0 means use default color logic; non-zero overrides zone color
 
     TTDeviceMarker() :
         runtime_host_id(INVALID_NUM),
@@ -137,7 +139,8 @@ struct TTDeviceMarker {
         file(""),
         marker_name(""),
         marker_type(TTDeviceMarkerType::ZONE_START),
-        marker_name_keyword_flags(std::array<bool, static_cast<uint16_t>(MarkerDetails::MarkerNameKeyword::COUNT)>())
+        marker_name_keyword_flags(std::array<bool, static_cast<uint16_t>(MarkerDetails::MarkerNameKeyword::COUNT)>()),
+        color(0)
 #ifdef TRACY_TT_HAS_FULL_DEPS
         , meta_data(nlohmann::json::object())
 #endif
@@ -161,7 +164,8 @@ struct TTDeviceMarker {
         const std::string& marker_name,
         TTDeviceMarkerType marker_type,
         const std::array<bool, static_cast<uint16_t>(MarkerDetails::MarkerNameKeyword::COUNT)>& marker_name_keyword_flags,
-        const nlohmann::json& meta_data) :
+        const nlohmann::json& meta_data,
+        uint32_t color = 0) :
         runtime_host_id(runtime_host_id),
         trace_id(trace_id),
         trace_id_counter(trace_id_counter),
@@ -178,6 +182,7 @@ struct TTDeviceMarker {
         marker_name(marker_name),
         marker_type(marker_type),
         marker_name_keyword_flags(marker_name_keyword_flags),
+        color(color),
         meta_data(meta_data) {}
 #endif
 
