@@ -166,6 +166,12 @@ struct backtrace_state
   struct backtrace_freelist_struct *freelist;
   /* Trigger an known address range refresh */
   request_known_address_ranges_refresh request_known_address_ranges_refresh_fn;
+  /* Non-zero if this state is for an external file, not the current
+     process.  When set, backtrace_initialize will not treat the file
+     as the main executable (bypassing the ET_DYN deferral to
+     dl_iterate_phdr) and will not enumerate the current process's
+     shared libraries.  */
+  int external_file;
 };
 
 /* Open a file for reading.  Returns -1 on error.  If DOES_NOT_EXIST
@@ -333,10 +339,44 @@ struct dwarf_sections
 
 struct dwarf_data;
 
+/* The load address mapping.  */
+
+#if defined(__FDPIC__) && defined(HAVE_DL_ITERATE_PHDR) && (defined(HAVE_LINK_H) || defined(HAVE_SYS_LINK_H))
+
+#ifdef HAVE_LINK_H
+ #include <link.h>
+#endif
+#ifdef HAVE_SYS_LINK_H
+ #include <sys/link.h>
+#endif
+
+#define libbacktrace_using_fdpic() (1)
+
+struct libbacktrace_base_address
+{
+  struct elf32_fdpic_loadaddr m;
+};
+
+#define libbacktrace_add_base(pc, base) \
+  ((uintptr_t) (__RELOC_POINTER ((pc), (base).m)))
+
+#else /* not _FDPIC__ */
+
+#define libbacktrace_using_fdpic() (0)
+
+struct libbacktrace_base_address
+{
+  uintptr_t m;
+};
+
+#define libbacktrace_add_base(pc, base) ((pc) + (base).m)
+
+#endif /* not _FDPIC__ */
+
 /* Add file/line information for a DWARF module.  */
 
 extern int backtrace_dwarf_add (struct backtrace_state *state,
-				uintptr_t base_address,
+				struct libbacktrace_base_address base_address,
 				const struct dwarf_sections *dwarf_sections,
 				int is_bigendian,
 				struct dwarf_data *fileline_altlink,
