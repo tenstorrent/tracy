@@ -1,5 +1,9 @@
+#include <algorithm>
+#include <cctype>
 #include <inttypes.h>
+#include <numeric>
 #include <random>
+#include <string>
 
 #include "TracyFilesystem.hpp"
 #include "TracyImGui.hpp"
@@ -26,6 +30,193 @@ static void DefaultMarker( bool active, bool tooltip = true )
         ImGui::TextUnformatted( "Has a default value loaded when starting Tracy (see below)." );
         ImGui::EndTooltip();
     }
+}
+
+static int NaturalCompare( const std::string& a, const std::string& b )
+{
+    const char* pa = a.c_str();
+    const char* pb = b.c_str();
+    while( *pa && *pb )
+    {
+        if( isdigit( (unsigned char)*pa ) && isdigit( (unsigned char)*pb ) )
+        {
+            unsigned long na = strtoul( pa, const_cast<char**>(&pa), 10 );
+            unsigned long nb = strtoul( pb, const_cast<char**>(&pb), 10 );
+            if( na != nb ) return na < nb ? -1 : 1;
+        }
+        else
+        {
+            int ca = tolower( (unsigned char)*pa );
+            int cb = tolower( (unsigned char)*pb );
+            if( ca != cb ) return ca < cb ? -1 : 1;
+            ++pa;
+            ++pb;
+        }
+    }
+    if( *pa ) return 1;
+    if( *pb ) return -1;
+    return 0;
+}
+
+struct SearchPart
+{
+    std::string text;
+    bool isDigit;
+};
+
+static std::vector<std::string> ExtractWords( const char* s )
+{
+    std::vector<std::string> words;
+    while( *s )
+    {
+        if( isalnum( (unsigned char)*s ) )
+        {
+            std::string w;
+            while( *s && isalnum( (unsigned char)*s ) ) w += *s++;
+            words.push_back( std::move( w ) );
+        }
+        else ++s;
+    }
+    return words;
+}
+
+static std::vector<SearchPart> SplitParts( const char* s )
+{
+    std::string alnum;
+    for( ; *s; ++s )
+        if( isalnum( (unsigned char)*s ) ) alnum += *s;
+    std::vector<SearchPart> parts;
+    size_t i = 0;
+    while( i < alnum.size() )
+    {
+        bool dig = isdigit( (unsigned char)alnum[i] ) != 0;
+        std::string p;
+        while( i < alnum.size() && ( isdigit( (unsigned char)alnum[i] ) != 0 ) == dig )
+            p += alnum[i++];
+        parts.push_back( { std::move( p ), dig } );
+    }
+    return parts;
+}
+
+static bool CiPrefix( const std::string& word, const std::string& prefix )
+{
+    if( prefix.size() > word.size() ) return false;
+    for( size_t i = 0; i < prefix.size(); i++ )
+        if( std::tolower( (unsigned char)word[i] ) != std::tolower( (unsigned char)prefix[i] ) ) return false;
+    return true;
+}
+
+static bool MatchParts( const std::vector<std::string>& words, size_t wi,
+                        const std::vector<SearchPart>& parts, size_t pi, bool anchorDigit )
+{
+    if( pi >= parts.size() ) return true;
+    const auto& part = parts[pi];
+
+    if( part.isDigit )
+    {
+        if( anchorDigit )
+        {
+            while( wi < words.size() && !isdigit( (unsigned char)words[wi][0] ) ) ++wi;
+            if( wi >= words.size() ) return false;
+            std::string cat;
+            size_t we = wi;
+            while( we < words.size() && isdigit( (unsigned char)words[we][0] ) ) cat += words[we++];
+            return CiPrefix( cat, part.text ) && MatchParts( words, we, parts, pi + 1, true );
+        }
+        for( size_t i = wi; i < words.size(); i++ )
+        {
+            if( !isdigit( (unsigned char)words[i][0] ) ) continue;
+            std::string cat;
+            size_t we = i;
+            while( we < words.size() && isdigit( (unsigned char)words[we][0] ) ) cat += words[we++];
+            if( CiPrefix( cat, part.text ) && MatchParts( words, we, parts, pi + 1, true ) )
+                return true;
+            i = we - 1;
+        }
+        return false;
+    }
+
+    for( size_t i = wi; i < words.size(); i++ )
+    {
+        if( isdigit( (unsigned char)words[i][0] ) ) continue;
+        if( CiPrefix( words[i], part.text ) && MatchParts( words, i + 1, parts, pi + 1, true ) )
+            return true;
+    }
+    return false;
+}
+
+static bool MatchCondition( const std::vector<std::string>& words, const char* token )
+{
+    auto parts = SplitParts( token );
+    return parts.empty() || MatchParts( words, 0, parts, 0, false );
+}
+
+static bool FuzzyMatch( const char* haystack, const char* needle )
+{
+    auto words = ExtractWords( haystack );
+    std::string search( needle );
+
+    size_t orStart = 0;
+    bool anyOrGroup = false;
+    while( orStart <= search.size() )
+    {
+        size_t orEnd = search.find( '|', orStart );
+        if( orEnd == std::string::npos ) orEnd = search.size();
+        std::string orGroup = search.substr( orStart, orEnd - orStart );
+
+        bool groupMatch = true;
+        size_t start = 0;
+        bool hasConditions = false;
+        while( start < orGroup.size() )
+        {
+            while( start < orGroup.size() && orGroup[start] == '&' ) ++start;
+            if( start >= orGroup.size() ) break;
+            size_t end = start;
+            while( end < orGroup.size() && orGroup[end] != '&' ) ++end;
+            std::string token = orGroup.substr( start, end - start );
+            start = end;
+
+            size_t ti = 0;
+            while( ti < token.size() && token[ti] == ' ' ) ++ti;
+            if( ti >= token.size() ) continue;
+
+            bool negate = false;
+            if( token[ti] == '!' )
+            {
+                negate = true;
+                token = token.substr( ti + 1 );
+            }
+            else
+            {
+                token = token.substr( ti );
+            }
+
+            hasConditions = true;
+            bool matches = MatchCondition( words, token.c_str() );
+            if( negate ) matches = !matches;
+            if( !matches ) { groupMatch = false; break; }
+        }
+
+        if( hasConditions ) anyOrGroup = true;
+        if( groupMatch && hasConditions ) return true;
+        orStart = orEnd + 1;
+    }
+    return !anyOrGroup;
+}
+
+const char* View::GetGpuContextLabel( const GpuCtxData* gpu )
+{
+    static char buf[4096];
+    if( gpu->name.Active() )
+    {
+        snprintf( buf, sizeof( buf ), "%s", m_worker.GetString( gpu->name ) );
+    }
+    else
+    {
+        auto& item = (TimelineItemGpu&)( m_tc.GetItem( gpu ) );
+        snprintf( buf, sizeof( buf ), "%s context %i", GpuContextNames[(int)gpu->type], item.GetIdx() );
+    }
+    return buf;
 }
 
 void View::DrawOptions()
@@ -123,34 +314,72 @@ void View::DrawOptions()
         }
         if( expand )
         {
+	    ImGui::SameLine();
+	    if( ImGui::SmallButton( "Select all" ) )
+	    {
+		for( size_t i=0; i<gpuData.size(); i++ )
+		{
+		    const char* label = GetGpuContextLabel( gpuData[i] );
+		    if( !m_gpuFilterBuf[0] || FuzzyMatch( label, m_gpuFilterBuf ) )
+			m_tc.GetItem( gpuData[i] ).SetVisible( true );
+		}
+	    }
+	    ImGui::SameLine();
+	    if( ImGui::SmallButton( "Unselect all" ) )
+	    {
+		for( size_t i=0; i<gpuData.size(); i++ )
+		{
+		    const char* label = GetGpuContextLabel( gpuData[i] );
+		    if( !m_gpuFilterBuf[0] || FuzzyMatch( label, m_gpuFilterBuf ) )
+			m_tc.GetItem( gpuData[i] ).SetVisible( false );
+		}
+	    }
+
+            ImGui::SetNextItemWidth( 200 * scale );
+            ImGui::InputTextWithHint( "##gpufilter", ICON_FA_FILTER " Filter GPU contexts", m_gpuFilterBuf, 256 );
+
+            std::vector<size_t> gpuOrder( gpuData.size() );
+            std::iota( gpuOrder.begin(), gpuOrder.end(), 0 );
+            std::vector<std::string> gpuLabels( gpuData.size() );
             for( size_t i=0; i<gpuData.size(); i++ )
             {
-                const auto& timeline = gpuData[i]->threadData.begin()->second.timeline;
-                m_tc.GetItem( gpuData[i] ).VisibilityCheckbox();
+                gpuLabels[i] = GetGpuContextLabel( gpuData[i] );
+            }
+            std::sort( gpuOrder.begin(), gpuOrder.end(), [&gpuLabels]( size_t a, size_t b ) {
+                return NaturalCompare( gpuLabels[a], gpuLabels[b] ) < 0;
+            } );
+
+            for( auto idx : gpuOrder )
+            {
+                const char* label = gpuLabels[idx].c_str();
+                if( m_gpuFilterBuf[0] && !FuzzyMatch( label, m_gpuFilterBuf ) ) continue;
+
+                const auto& timeline = gpuData[idx]->threadData.begin()->second.timeline;
+                m_tc.GetItem( gpuData[idx] ).VisibilityCheckbox();
                 ImGui::SameLine();
-                if( gpuData[i]->threadData.size() == 1 )
+                if( gpuData[idx]->threadData.size() == 1 )
                 {
                     ImGui::TextDisabled( "%s top level zones", RealToString( timeline.size() ) );
                 }
                 else
                 {
-                    ImGui::TextDisabled( "%s threads", RealToString( gpuData[i]->threadData.size() ) );
+                    ImGui::TextDisabled( "%s threads", RealToString( gpuData[idx]->threadData.size() ) );
                 }
-                if( gpuData[i]->name.Active() )
+                if( gpuData[idx]->name.Active() )
                 {
                     char buf[64];
-                    auto& item = (TimelineItemGpu&)( m_tc.GetItem( gpuData[i] ) );
-                    sprintf( buf, "%s context %i", GpuContextNames[(int)gpuData[i]->type], item.GetIdx() );
+                    auto& item = (TimelineItemGpu&)( m_tc.GetItem( gpuData[idx] ) );
+                    sprintf( buf, "%s context %i", GpuContextNames[(int)gpuData[idx]->type], item.GetIdx() );
                     ImGui::PushFont( g_fonts.normal, FontSmall );
                     ImGui::TextUnformatted( buf );
                     ImGui::PopFont();
                 }
-                if( !gpuData[i]->hasCalibration )
+                if( !gpuData[idx]->hasCalibration )
                 {
                     ImGui::TreePush( (void*)nullptr );
-                    auto& drift = GpuDrift( gpuData[i] );
+                    auto& drift = GpuDrift( gpuData[idx] );
                     ImGui::SetNextItemWidth( 120 * scale );
-                    ImGui::PushID( i );
+                    ImGui::PushID( (int)idx );
                     ImGui::InputInt( "Drift (ns/s)", &drift );
                     ImGui::PopID();
                     if( timeline.size() > 1 )
@@ -188,7 +417,7 @@ void View::DrawOptions()
                             std::default_random_engine gen( rd() );
                             std::uniform_int_distribution<size_t> dist( 0, lastidx - 1 );
                             float slopes[NumSlopes];
-                            size_t idx = 0;
+                            size_t slopeIdx = 0;
                             if( timeline.is_magic() )
                             {
                                 auto& tl = *((Vector<GpuEvent>*)&timeline);
@@ -198,10 +427,10 @@ void View::DrawOptions()
                                     const auto p1 = dist( gen );
                                     if( p0 != p1 )
                                     {
-                                        slopes[idx++] = float( 1.0 - double( tl[p1].GpuStart() - tl[p0].GpuStart() ) / double( tl[p1].CpuStart() - tl[p0].CpuStart() ) );
+                                        slopes[slopeIdx++] = float( 1.0 - double( tl[p1].GpuStart() - tl[p0].GpuStart() ) / double( tl[p1].CpuStart() - tl[p0].CpuStart() ) );
                                     }
                                 }
-                                while( idx < NumSlopes );
+                                while( slopeIdx < NumSlopes );
                             }
                             else
                             {
@@ -211,10 +440,10 @@ void View::DrawOptions()
                                     const auto p1 = dist( gen );
                                     if( p0 != p1 )
                                     {
-                                        slopes[idx++] = float( 1.0 - double( timeline[p1]->GpuStart() - timeline[p0]->GpuStart() ) / double( timeline[p1]->CpuStart() - timeline[p0]->CpuStart() ) );
+                                        slopes[slopeIdx++] = float( 1.0 - double( timeline[p1]->GpuStart() - timeline[p0]->GpuStart() ) / double( timeline[p1]->CpuStart() - timeline[p0]->CpuStart() ) );
                                     }
                                 }
-                                while( idx < NumSlopes );
+                                while( slopeIdx < NumSlopes );
                             }
                             pdqsort_branchless( slopes, slopes+NumSlopes );
                             drift = int( 1000000000 * -slopes[NumSlopes/2] );
@@ -440,7 +669,7 @@ void View::DrawOptions()
             }
             else
             {
-                ImGui::TextDisabled( "(%zu/%zu)", visibleMultiCntUncont, multiCntUncont );
+                ImGui::TextDisabled( "(%llu/%zu)", visibleMultiCntUncont, multiCntUncont );
             }
             if( multiUncontExpand )
             {
@@ -527,7 +756,7 @@ void View::DrawOptions()
             }
             else
             {
-                ImGui::TextDisabled( "(%zu/%zu)", visibleSingleCnt, singleCnt );
+                ImGui::TextDisabled( "(%llu/%zu)", visibleSingleCnt, singleCnt );
             }
             if( singleExpand )
             {
@@ -817,7 +1046,7 @@ void View::DrawOptions()
         }
         else
         {
-            ImGui::TextDisabled( "(%zu/%zu)", visibleFrames, m_worker.GetFrames().size() );
+            ImGui::TextDisabled( "(%llu/%zu)", visibleFrames, m_worker.GetFrames().size() );
         }
         if( expand )
         {
