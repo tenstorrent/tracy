@@ -90,9 +90,54 @@
       var spinnerElement = document.getElementById('spinner');
       var preloadElement = document.getElementById('preload');
 
+      // --- Multi-trace support ---
+      var tracyTracesList = [];
+      function fetchTracesList() {
+        fetch('/traces')
+          .then(response => response.json())
+          .then(data => { tracyTracesList = data; })
+          .catch(() => { tracyTracesList = []; });
+      }
+      // Expose to C++
       var Module = {
-        preRun: [],
+        preRun: [function() {
+            fetchTracesList();
+            // Support ?trace=filename query param
+            function getQueryParam(name) {
+              var url = new URL(window.location.href);
+              return url.searchParams.get(name);
+            }
+            var traceParam = getQueryParam('trace');
+            var TRACE_FILENAME = traceParam ? traceParam : 'embed.tracy';
+            var fetchFailed = false;
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', (traceParam ? '/traces/' + encodeURIComponent(traceParam) : TRACE_FILENAME) + '?t=' + Date.now(), false); // synchronous
+            xhr.overrideMimeType('text/plain; charset=x-user-defined');
+            xhr.onload = function() {
+              if (xhr.status === 200) {
+                var s = xhr.responseText;
+                var byteArray = new Uint8Array(s.length);
+                for (var i = 0; i < s.length; i++) {
+                  byteArray[i] = s.charCodeAt(i) & 0xff;
+                }
+                try { FS.unlink('/embed.tracy'); } catch (e) {}
+                FS.writeFile('/embed.tracy', byteArray);
+                console.log('embed.tracy written to Emscripten FS, size:', byteArray.length);
+              } else {
+                fetchFailed = true;
+              }
+            };
+            xhr.onerror = function() {
+              fetchFailed = true;
+            };
+            xhr.send();
+            if (fetchFailed) {
+              alert('Trace file not found or failed to load. Run with python -m tracy to generate trace files.');
+              throw new Error('embed.tracy not found');
+            }
+        }],
         postRun: [],
+        arguments: ['embed.tracy'],
         print: (function() {
           return function(text) {
             if (arguments.length > 1) text = Array.prototype.slice.call(arguments).join(' ');
@@ -101,12 +146,7 @@
         })(),
         canvas: (function() {
           var canvas = document.getElementById('canvas');
-
-          // As a default initial behavior, pop up an alert when webgl context is lost. To make your
-          // application robust, you may want to override this behavior before shipping!
-          // See http://www.khronos.org/registry/webgl/specs/latest/1.0/#5.15.2
           canvas.addEventListener("webglcontextlost", function(e) { alert('WebGL context lost. You will need to reload the page.'); e.preventDefault(); }, false);
-
           return canvas;
         })(),
         setStatus: function(text) {
@@ -114,7 +154,7 @@
           if (text === Module.setStatus.last.text) return;
           var m = text.match(/([^(]+)\((\d+(\.\d+)?)\/(\d+)\)/);
           var now = Date.now();
-          if (m && now - Module.setStatus.last.time < 30) return; // if this is a progress update, skip it if too soon
+          if (m && now - Module.setStatus.last.time < 30) return;
           Module.setStatus.last.time = now;
           Module.setStatus.last.text = text;
           if (m) {
@@ -139,9 +179,28 @@
           Module.setStatus(left ? 'Preparing... (' + (this.totalDependencies-left) + '/' + this.totalDependencies + ')' : 'All downloads complete.');
         }
       };
+
+      // Emscripten C++ glue for trace list
+      mergeInto(LibraryManager.library, {
+        getTraceCount: function() {
+          return tracyTracesList.length|0;
+        },
+        getTraceName: function(idx) {
+          if (idx < 0 || idx >= tracyTracesList.length) return 0;
+          return allocate(intArrayFromString(tracyTracesList[idx]), 'i8', ALLOC_STACK);
+        },
+        fetchAndWriteTrace: function(idx) {
+          if (idx < 0 || idx >= tracyTracesList.length) return;
+          var name = tracyTracesList[idx];
+          // Reload page with ?trace=name
+          var url = new URL(window.location.href);
+          url.searchParams.set('trace', name);
+          window.location.href = url.toString();
+        }
+      });
+
       Module.setStatus('Downloading...');
       window.onerror = function(event) {
-        // TODO: do not warn on ok events like simulating an infinite loop or exitStatus
         Module.setStatus('Exception thrown, see JavaScript console');
         spinnerElement.style.display = 'none';
         Module.setStatus = function(text) {
@@ -150,5 +209,35 @@
       };
     </script>
     <script async type="text/javascript" src="tracy-profiler.js"></script>
+    <script>
+      // WebSocket auto-reload for embed.tracy changes.
+      // The server derives the WebSocket port as HTTP-port + 1 (see serve_wasm.py),
+      // so derive it the same way from the port the browser actually connected on
+      // instead of hard-coding it. Falls back to 8080 when the URL omits a port
+      // (e.g. served on default 80/443). This keeps live-reload working on any
+      // --port / TRACY_WASM_HTTP_PORT value, not just the 8080 default.
+      (function() {
+        var httpPort = parseInt(location.port, 10);
+        var wsPort = (Number.isFinite(httpPort) ? httpPort : 8080) + 1;
+        var ws = new WebSocket('ws://' + location.hostname + ':' + wsPort);
+        ws.onmessage = function(event) {
+          if (event.data === 'reload') {
+            // A new capture arrived: show it (the default embed.tracy), not whatever
+            // ?trace= is pinned in the URL. location.reload() keeps the query string and
+            // would just re-load the old pinned trace, so drop it back to the bare path.
+            if (location.search || location.hash) {
+              location.href = location.pathname;
+            } else {
+              location.reload();
+            }
+          }
+        };
+        ws.onclose = function() {
+          // Connection lost (e.g. server restart): reconnect by reloading the current
+          // view as-is, preserving any ?trace= the user is looking at.
+          setTimeout(function() { location.reload(); }, 2000);
+        };
+      })();
+    </script>
   </body>
 </html>
