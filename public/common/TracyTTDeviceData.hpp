@@ -101,6 +101,7 @@ struct TTDeviceMarker {
     uint16_t marker_id;
     uint64_t timestamp;
     uint64_t data;
+    uint64_t data_high;
     std::string op_name;
     uint64_t line;
     std::string file;
@@ -120,6 +121,7 @@ struct TTDeviceMarker {
         marker_id(INVALID_NUM),
         timestamp(INVALID_NUM),
         data(INVALID_NUM),
+        data_high(INVALID_NUM),
         op_name(""),
         line(INVALID_NUM),
         file(""),
@@ -139,6 +141,7 @@ struct TTDeviceMarker {
         uint16_t marker_id,
         uint64_t timestamp,
         uint64_t data,
+        uint64_t data_high,
         const std::string& op_name,
         uint64_t line,
         const std::string& file,
@@ -156,6 +159,7 @@ struct TTDeviceMarker {
         marker_id(marker_id),
         timestamp(timestamp),
         data(data),
+        data_high(data_high),
         op_name(op_name),
         line(line),
         file(file),
