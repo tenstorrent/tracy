@@ -25,7 +25,33 @@ enum class RiscType : uint8_t {
     ERISC,
     TENSIX_RISC_AGG,  // TENSIX_RISC_AGG represents all the Tensix RISCs on device, but it itself isn't a RISC
                       // defined on the device
-    NONE              // No RISC label displayed (used for host-side telemetry contexts)
+    NONE,             // No RISC label displayed (used for host-side telemetry contexts)
+    // Quasar Tensix processors, ordered to match internal_::get_hw_thread_idx() on the device:
+    // DM0..DM7 (0-7), then Neo0..Neo3 x TRISC0..TRISC3 (8-23).
+    QUASAR_DM0,
+    QUASAR_DM1,
+    QUASAR_DM2,
+    QUASAR_DM3,
+    QUASAR_DM4,
+    QUASAR_DM5,
+    QUASAR_DM6,
+    QUASAR_DM7,
+    QUASAR_NEO0_TRISC0,
+    QUASAR_NEO0_TRISC1,
+    QUASAR_NEO0_TRISC2,
+    QUASAR_NEO0_TRISC3,
+    QUASAR_NEO1_TRISC0,
+    QUASAR_NEO1_TRISC1,
+    QUASAR_NEO1_TRISC2,
+    QUASAR_NEO1_TRISC3,
+    QUASAR_NEO2_TRISC0,
+    QUASAR_NEO2_TRISC1,
+    QUASAR_NEO2_TRISC2,
+    QUASAR_NEO2_TRISC3,
+    QUASAR_NEO3_TRISC0,
+    QUASAR_NEO3_TRISC1,
+    QUASAR_NEO3_TRISC2,
+    QUASAR_NEO3_TRISC3,
 };
 
 enum class TTDeviceMarkerType : uint8_t { ZONE_START, ZONE_END, ZONE_TOTAL, TS_DATA, TS_EVENT, TS_DATA_16B };
