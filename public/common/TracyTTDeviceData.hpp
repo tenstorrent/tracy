@@ -2,6 +2,7 @@
 #define __TRACYTTDEVICEDATA_HPP__
 
 #include <array>
+#include <cassert>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -26,8 +27,8 @@ enum class RiscType : uint8_t {
     TENSIX_RISC_AGG,  // TENSIX_RISC_AGG represents all the Tensix RISCs on device, but it itself isn't a RISC
                       // defined on the device
     NONE,             // No RISC label displayed (used for host-side telemetry contexts)
-    // Quasar Tensix processors, ordered to match internal_::get_hw_thread_idx() on the device:
-    // DM0..DM7 (0-7), then Neo0..Neo3 x TRISC0..TRISC3 (8-23).
+    // Quasar Tensix processors, ordered like internal_::get_hw_thread_idx() on the device:
+    // DM0..DM7, then Neo0..Neo3 x TRISC0..TRISC3.
     QUASAR_DM0,
     QUASAR_DM1,
     QUASAR_DM2,
@@ -288,8 +289,10 @@ struct TTDeviceMarker {
 #endif
 
     uint32_t get_thread_id() const {
-        uint32_t threadID = static_cast<uint8_t>(risc) | core_x << CORE_X_BIT_SHIFT | core_y << CORE_Y_BIT_SHIFT |
-                            chip_id << CHIP_BIT_SHIFT;
+        assert(static_cast<uint32_t>(risc) < (1u << RISC_BIT_COUNT));
+        const uint32_t risc_bits = static_cast<uint8_t>(risc) & ((1u << RISC_BIT_COUNT) - 1);
+        uint32_t threadID =
+            risc_bits | core_x << CORE_X_BIT_SHIFT | core_y << CORE_Y_BIT_SHIFT | chip_id << CHIP_BIT_SHIFT;
 
         return threadID;
     }
