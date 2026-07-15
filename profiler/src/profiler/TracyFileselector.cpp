@@ -50,7 +50,7 @@ extern "C" int nativeOpenFile()
 }
 #endif
 
-static bool OpenFileImpl( const char* ext, const char* desc, const std::function<void(const char*)>& callback )
+static bool OpenFileImpl( const char* ext, const char* desc, const std::function<void(const char*)>& callback, const char* defaultPath )
 {
 #ifndef TRACY_NO_FILESELECTOR
 #  ifdef __EMSCRIPTEN__
@@ -77,7 +77,7 @@ static bool OpenFileImpl( const char* ext, const char* desc, const std::function
 #  else
     nfdu8filteritem_t filter = { desc, ext };
     nfdu8char_t* fn;
-    const auto res = NFD_OpenDialogU8( &fn, &filter, 1, nullptr );
+    const auto res = NFD_OpenDialogU8( &fn, &filter, 1, defaultPath );
     if( res == NFD_OKAY )
     {
         callback( (const char*)fn );
@@ -93,12 +93,12 @@ static bool OpenFileImpl( const char* ext, const char* desc, const std::function
     return false;
 }
 
-static bool SaveFileImpl( const char* ext, const char* desc, const std::function<void(const char*)>& callback )
+static bool SaveFileImpl( const char* ext, const char* desc, const std::function<void(const char*)>& callback, const char* defaultPath )
 {
 #if !defined TRACY_NO_FILESELECTOR && !defined __EMSCRIPTEN__
     nfdu8filteritem_t filter = { desc, ext };
     nfdu8char_t* fn;
-    const auto res = NFD_SaveDialogU8( &fn, &filter, 1, nullptr, nullptr );
+    const auto res = NFD_SaveDialogU8( &fn, &filter, 1, defaultPath, nullptr );
     if( res == NFD_OKAY )
     {
         callback( (const char*)fn );
@@ -113,14 +113,14 @@ static bool SaveFileImpl( const char* ext, const char* desc, const std::function
     return false;
 }
 
-void OpenFile( const char* ext, const char* desc, const std::function<void(const char*)>& callback )
+void OpenFile( const char* ext, const char* desc, const std::function<void(const char*)>& callback, const char* defaultPath )
 {
-    if( !OpenFileImpl( ext, desc, callback ) ) s_hasFailed = true;
+    if( !OpenFileImpl( ext, desc, callback, defaultPath ) ) s_hasFailed = true;
 }
 
-void SaveFile( const char* ext, const char* desc, const std::function<void(const char*)>& callback )
+void SaveFile( const char* ext, const char* desc, const std::function<void(const char*)>& callback, const char* defaultPath )
 {
-    if( !SaveFileImpl( ext, desc, callback ) ) s_hasFailed = true;
+    if( !SaveFileImpl( ext, desc, callback, defaultPath ) ) s_hasFailed = true;
 }
 
 }

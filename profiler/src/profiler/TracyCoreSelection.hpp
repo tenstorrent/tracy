@@ -21,6 +21,10 @@ namespace tracy::CoreSelection
 // Path to the auto-saved "latest" selection in the global tracy config dir.
 const char* LatestPath();
 
+// The directory selection files are stored in (no trailing slash). This is
+// where file dialogs should default to and where List() searches.
+std::string DirPath();
+
 // Selection files discoverable in the global tracy config dir, as
 // {display name, full path} pairs sorted by display name.
 std::vector<std::pair<std::string, std::string>> List();

@@ -382,12 +382,14 @@ void View::DrawOptions()
 	    }
 
 #ifndef TRACY_NO_FILESELECTOR
+            const std::string coreSelDir = CoreSelection::DirPath();
+            const char* coreSelDefault = coreSelDir.empty() ? nullptr : coreSelDir.c_str();
             ImGui::SameLine();
             if( ImGui::SmallButton( ICON_FA_FLOPPY_DISK ) )
             {
                 Fileselector::SaveFile( "coresel", "Tracy core selection", [this]( const char* fn ) {
                     SaveGpuSelection( fn );
-                } );
+                }, coreSelDefault );
             }
             if( ImGui::IsItemHovered() ) ImGui::SetTooltip( "Save core selection" );
             ImGui::SameLine();
@@ -405,7 +407,7 @@ void View::DrawOptions()
                 {
                     Fileselector::OpenFile( "coresel", "Tracy core selection", [this]( const char* fn ) {
                         LoadGpuSelection( fn );
-                    } );
+                    }, coreSelDefault );
                 }
                 ImGui::EndPopup();
             }

@@ -40,28 +40,35 @@ static std::string DisplayName( const std::string& fileName )
     return name;
 }
 
+std::string DirPath()
+{
+    // The directory selections live in is the directory of LatestPath().
+    std::string dir = LatestPath();
+    const size_t slash = dir.find_last_of( '/' );
+    if( slash == std::string::npos ) return std::string();
+    dir.erase( slash );
+    return dir;
+}
+
 std::vector<std::pair<std::string, std::string>> List()
 {
     std::vector<std::pair<std::string, std::string>> res;
 
-    // The directory selections live in is the directory of LatestPath().
-    std::string dir = LatestPath();
-    const size_t slash = dir.find_last_of( '/' );
-    if( slash == std::string::npos ) return res;
-    dir.erase( slash + 1 );
+    const std::string dir = DirPath();
+    if( dir.empty() ) return res;
 
     const size_t extLen = strlen( Extension );
 
 #ifdef _WIN32
     WIN32_FIND_DATAA fd;
-    HANDLE h = FindFirstFileA( ( dir + "*" + Extension ).c_str(), &fd );
+    HANDLE h = FindFirstFileA( ( dir + "/*" + Extension ).c_str(), &fd );
     if( h != INVALID_HANDLE_VALUE )
     {
         do
         {
             if( fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ) continue;
             const std::string fn = fd.cFileName;
-            res.emplace_back( DisplayName( fn ), dir + fn );
+            res.emplace_back( DisplayName( fn ), dir + "/" + fn );
         }
         while( FindNextFileA( h, &fd ) );
         FindClose( h );
@@ -74,7 +81,7 @@ std::vector<std::pair<std::string, std::string>> List()
             const std::string fn = e->d_name;
             if( fn.size() < extLen ) continue;
             if( fn.compare( fn.size() - extLen, extLen, Extension ) != 0 ) continue;
-            res.emplace_back( DisplayName( fn ), dir + fn );
+            res.emplace_back( DisplayName( fn ), dir + "/" + fn );
         }
         closedir( d );
     }
