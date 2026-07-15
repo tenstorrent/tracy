@@ -383,18 +383,31 @@ void View::DrawOptions()
 
 #ifndef TRACY_NO_FILESELECTOR
             ImGui::SameLine();
-            if( ImGui::SmallButton( ICON_FA_FLOPPY_DISK " Save selection" ) )
+            if( ImGui::SmallButton( ICON_FA_FLOPPY_DISK ) )
             {
                 Fileselector::SaveFile( "coresel", "Tracy core selection", [this]( const char* fn ) {
                     SaveGpuSelection( fn );
                 } );
             }
+            if( ImGui::IsItemHovered() ) ImGui::SetTooltip( "Save core selection" );
             ImGui::SameLine();
-            if( ImGui::SmallButton( ICON_FA_FOLDER_OPEN " Load selection" ) )
+            if( ImGui::SmallButton( ICON_FA_FOLDER_OPEN ) ) ImGui::OpenPopup( "CoreSelLoad" );
+            if( ImGui::IsItemHovered() ) ImGui::SetTooltip( "Load core selection" );
+            if( ImGui::BeginPopup( "CoreSelLoad" ) )
             {
-                Fileselector::OpenFile( "coresel", "Tracy core selection", [this]( const char* fn ) {
-                    LoadGpuSelection( fn );
-                } );
+                const auto saved = CoreSelection::List();
+                for( const auto& s : saved )
+                {
+                    if( ImGui::Selectable( s.first.c_str() ) ) LoadGpuSelection( s.second.c_str() );
+                }
+                if( !saved.empty() ) ImGui::Separator();
+                if( ImGui::Selectable( ICON_FA_FOLDER_OPEN " Browse..." ) )
+                {
+                    Fileselector::OpenFile( "coresel", "Tracy core selection", [this]( const char* fn ) {
+                        LoadGpuSelection( fn );
+                    } );
+                }
+                ImGui::EndPopup();
             }
 #endif
 

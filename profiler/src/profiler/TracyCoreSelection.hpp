@@ -3,6 +3,8 @@
 
 #include <string>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
 namespace tracy::CoreSelection
 {
@@ -11,9 +13,17 @@ namespace tracy::CoreSelection
 // on the timeline. It is persisted as a newline-separated text file so that it
 // is portable across traces (a selection made on one chip can be loaded for
 // another) and easy to inspect by hand.
+//
+// Selections are stored in the global tracy config dir with a ".coresel"
+// extension so that previously saved selections can be listed and picked
+// directly, without going through a file dialog.
 
 // Path to the auto-saved "latest" selection in the global tracy config dir.
 const char* LatestPath();
+
+// Selection files discoverable in the global tracy config dir, as
+// {display name, full path} pairs sorted by display name.
+std::vector<std::pair<std::string, std::string>> List();
 
 bool Save( const char* path, const std::unordered_set<std::string>& labels );
 bool Load( const char* path, std::unordered_set<std::string>& labels );
