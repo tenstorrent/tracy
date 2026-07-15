@@ -109,7 +109,7 @@ struct TTDeviceMarker {
     uint64_t core_x;
     uint64_t core_y;
     RiscType risc;
-    uint16_t marker_id;
+    uint32_t marker_id;
     uint64_t timestamp;
     uint64_t data;
     uint64_t data_high;
@@ -157,7 +157,7 @@ struct TTDeviceMarker {
         uint64_t core_x,
         uint64_t core_y,
         RiscType risc,
-        uint16_t marker_id,
+        uint32_t marker_id,
         uint64_t timestamp,
         uint64_t data,
         uint64_t data_high,
