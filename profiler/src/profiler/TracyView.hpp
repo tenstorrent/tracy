@@ -7,8 +7,10 @@
 #include <functional>
 #include <memory>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 #include "imgui.h"
@@ -294,6 +296,11 @@ private:
     void DrawPlotPoint( const ImVec2& wpos, float x, float y, int offset, uint32_t color, bool hover, double val, PlotValueFormatting format, float PlotHeight );
     void DrawOptions();
     const char* GetGpuContextLabel( const GpuCtxData* gpu );
+    std::unordered_set<std::string> CollectVisibleGpuSelection();
+    void ApplyGpuSelection( const std::unordered_set<std::string>& sel );
+    void ApplyPendingGpuSelection();
+    void SaveGpuSelection( const char* path );
+    void LoadGpuSelection( const char* path );
     void DrawMessages();
     void DrawMessageLine( const MessageData& msg, bool hasCallstack, int& idx );
     void DrawFindZone();
@@ -551,6 +558,8 @@ private:
     };
     MessageFilter m_messageFilter;
     char m_gpuFilterBuf[256] = {};
+    // GPU core selection loaded from disk, applied once the timeline items exist.
+    std::optional<std::unordered_set<std::string>> m_pendingGpuSelection;
     bool m_showMessageImages = false;
     int m_visibleMessages = 0;
     int m_messagesPerSeverity[(size_t)MessageSeverity::COUNT] = {};
