@@ -2,6 +2,7 @@
 #define __TRACYTTDEVICEDATA_HPP__
 
 #include <array>
+#include <cassert>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -25,7 +26,33 @@ enum class RiscType : uint8_t {
     ERISC,
     TENSIX_RISC_AGG,  // TENSIX_RISC_AGG represents all the Tensix RISCs on device, but it itself isn't a RISC
                       // defined on the device
-    NONE              // No RISC label displayed (used for host-side telemetry contexts)
+    NONE,             // No RISC label displayed (used for host-side telemetry contexts)
+    // Quasar Tensix processors, ordered like internal_::get_hw_thread_idx() on the device:
+    // DM0..DM7, then Neo0..Neo3 x TRISC0..TRISC3.
+    QUASAR_DM0,
+    QUASAR_DM1,
+    QUASAR_DM2,
+    QUASAR_DM3,
+    QUASAR_DM4,
+    QUASAR_DM5,
+    QUASAR_DM6,
+    QUASAR_DM7,
+    QUASAR_NEO0_TRISC0,
+    QUASAR_NEO0_TRISC1,
+    QUASAR_NEO0_TRISC2,
+    QUASAR_NEO0_TRISC3,
+    QUASAR_NEO1_TRISC0,
+    QUASAR_NEO1_TRISC1,
+    QUASAR_NEO1_TRISC2,
+    QUASAR_NEO1_TRISC3,
+    QUASAR_NEO2_TRISC0,
+    QUASAR_NEO2_TRISC1,
+    QUASAR_NEO2_TRISC2,
+    QUASAR_NEO2_TRISC3,
+    QUASAR_NEO3_TRISC0,
+    QUASAR_NEO3_TRISC1,
+    QUASAR_NEO3_TRISC2,
+    QUASAR_NEO3_TRISC3,
 };
 
 enum class TTDeviceMarkerType : uint8_t { ZONE_START, ZONE_END, ZONE_TOTAL, TS_DATA, TS_EVENT, TS_DATA_16B };
@@ -42,6 +69,8 @@ struct MarkerDetails {
         ERISC_KERNEL,
         NCRISC_KERNEL,
         TRISC_KERNEL,
+        DM_KERNEL,
+        DM_FW,
         SYNC_ZONE,
         PROFILER,
         DISPATCH,
@@ -63,6 +92,8 @@ struct MarkerDetails {
         {"ERISC-KERNEL", MarkerNameKeyword::ERISC_KERNEL},
         {"NCRISC-KERNEL", MarkerNameKeyword::NCRISC_KERNEL},
         {"TRISC-KERNEL", MarkerNameKeyword::TRISC_KERNEL},
+        {"DM-KERNEL", MarkerNameKeyword::DM_KERNEL},
+        {"DM-FW", MarkerNameKeyword::DM_FW},
         {"SYNC-ZONE", MarkerNameKeyword::SYNC_ZONE},
         {"PROFILER", MarkerNameKeyword::PROFILER},
         {"DISPATCH", MarkerNameKeyword::DISPATCH},
@@ -262,8 +293,10 @@ struct TTDeviceMarker {
 #endif
 
     uint32_t get_thread_id() const {
-        uint32_t threadID = static_cast<uint8_t>(risc) | core_x << CORE_X_BIT_SHIFT | core_y << CORE_Y_BIT_SHIFT |
-                            chip_id << CHIP_BIT_SHIFT;
+        assert(static_cast<uint32_t>(risc) < (1u << RISC_BIT_COUNT));
+        const uint32_t risc_bits = static_cast<uint8_t>(risc) & ((1u << RISC_BIT_COUNT) - 1);
+        uint32_t threadID =
+            risc_bits | core_x << CORE_X_BIT_SHIFT | core_y << CORE_Y_BIT_SHIFT | chip_id << CHIP_BIT_SHIFT;
 
         return threadID;
     }
