@@ -1,4 +1,5 @@
 .vs
+.vscode/settings.json
 _build
 _compiler
 tools/*
