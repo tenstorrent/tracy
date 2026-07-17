@@ -30,11 +30,7 @@ public:
     ScopedZone& operator=( ScopedZone&& ) = delete;
 
     tracy_force_inline ScopedZone( const SourceLocationData* srcloc, int32_t depth = -1, bool is_active = true )
-#ifdef TRACY_ON_DEMAND
-        : m_active( is_active && GetProfiler().IsConnected() )
-#else
-        : m_active( is_active )
-#endif
+        : m_active( is_active && !GetProfiler().IsEmitSuppressed() )
     {
         if( !m_active ) return;
 #ifdef TRACY_ON_DEMAND
@@ -53,11 +49,7 @@ public:
     }
 
     tracy_force_inline ScopedZone( uint32_t line, const char* source, size_t sourceSz, const char* function, size_t functionSz, const char* name, size_t nameSz, uint32_t color, int32_t depth = -1, bool is_active = true )
-#ifdef TRACY_ON_DEMAND
-        : m_active( is_active && GetProfiler().IsConnected() )
-#else
-        : m_active( is_active )
-#endif
+        : m_active( is_active && !GetProfiler().IsEmitSuppressed() )
     {
         if( !m_active ) return;
 #ifdef TRACY_ON_DEMAND

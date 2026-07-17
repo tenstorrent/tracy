@@ -112,6 +112,9 @@ namespace tracy {
             m_frequency = frequency;
             m_tgpu = tgpu;
             if (tcpu == 0) tcpu = m_tcpu;
+            if (tracy::GetProfiler().IsEmitSuppressed()) {
+                return;
+            }
 
             auto item = Profiler::QueueSerial();
             MemWrite( &item->hdr.type, QueueType::GpuCalibration );
@@ -201,6 +204,9 @@ namespace tracy {
         }
 
         void PushStartMarker(const TTDeviceMarker& marker) {
+            if (tracy::GetProfiler().IsEmitSuppressed()) {
+                return;
+            }
             const auto queryId = this->NextQueryId(EventInfo{marker, EventPhase::Begin});
             const std::string run_id_string = this->getRunIdString(marker);
 
@@ -234,6 +240,9 @@ namespace tracy {
         }
 
         void PushEndMarker(const TTDeviceMarker& marker) {
+            if (tracy::GetProfiler().IsEmitSuppressed()) {
+                return;
+            }
             const auto queryId = this->NextQueryId(EventInfo{marker, EventPhase::End});
 
             auto zoneEnd = Profiler::QueueSerial();

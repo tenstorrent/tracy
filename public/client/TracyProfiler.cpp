@@ -1467,6 +1467,7 @@ Profiler::Profiler()
     , m_broadcast( nullptr )
     , m_noExit( false )
     , m_userPort( 0 )
+    , m_connectTimeout( std::chrono::seconds( 60 ) )
     , m_zoneId( 1 )
     , m_samplingPeriod( 0 )
     , m_stream( LZ4_createStream() )
@@ -1483,6 +1484,7 @@ Profiler::Profiler()
     , m_symbolQueue( 8*1024 )
     , m_frameCount( 0 )
     , m_isConnected( false )
+    , m_emitSuppressed( false )
 #ifdef TRACY_ON_DEMAND
     , m_connectionId( 0 )
     , m_symbolsBusy( false )
@@ -1528,6 +1530,19 @@ Profiler::Profiler()
     if( userPort )
     {
         m_userPort = atoi( userPort );
+    }
+
+    // Seconds before an unconnected client drops its buffered backlog and stops recording; 0 disables.
+    const char* connectTimeout = GetEnvVar( "TRACY_CONNECT_TIMEOUT" );
+    if( connectTimeout )
+    {
+        char* end;
+        const auto seconds = strtoll( connectTimeout, &end, 10 );
+        constexpr int64_t maxSeconds = std::chrono::nanoseconds::max().count() / 1'000'000'000;
+        if( end != connectTimeout && *end == '\0' && seconds >= 0 && seconds <= maxSeconds )
+        {
+            m_connectTimeout = std::chrono::seconds( seconds );
+        }
     }
 
     m_safeSendBuffer = (char*)tracy_malloc( SafeSendBufferSize );
@@ -1840,6 +1855,8 @@ void Profiler::Worker()
     }
     if( !isListening )
     {
+        // No listen socket bound: nothing can ever connect to drain the queues, so never buffer.
+        SuppressEmit();
         for(;;)
         {
             if( ShouldExit() )
@@ -1879,6 +1896,11 @@ void Profiler::Worker()
     auto& broadcastMsg = GetBroadcastMessage( procname, pnsz, broadcastLen, dataPort );
     uint64_t lastBroadcast = 0;
 
+#ifndef TRACY_ON_DEMAND
+    const auto waitStart = std::chrono::steady_clock::now();
+    bool connectRefusedWarned = false;
+#endif
+
     // Connections loop.
     // Each iteration of the loop handles whole connection. Multiple iterations will only
     // happen in the on-demand mode or when handshake fails.
@@ -1901,11 +1923,22 @@ void Profiler::Worker()
 #endif
             m_sock = listen.Accept();
             if( m_sock ) break;
+
 #ifndef TRACY_ON_DEMAND
-            ProcessSysTime();
+            if( m_connectTimeout.count() > 0 && !IsEmitSuppressed() &&
+                std::chrono::steady_clock::now() - waitStart > m_connectTimeout )
+            {
+                // Connect window lapsed with no client: drop the backlog and stop buffering (later connects are refused).
+                SuppressEmit();
+                ClearQueues( token );
+            }
+            if( !IsEmitSuppressed() )
+            {
+                ProcessSysTime();
 #  ifdef TRACY_HAS_SYSPOWER
-            m_sysPower.Tick();
+                m_sysPower.Tick();
 #  endif
+            }
 #endif
 
             if( m_broadcast )
@@ -1969,6 +2002,24 @@ void Profiler::Worker()
                 continue;
             }
         }
+
+#ifndef TRACY_ON_DEMAND
+        if( IsEmitSuppressed() )
+        {
+            HandshakeStatus status = HandshakeNotAvailable;
+            m_sock->Send( &status, sizeof( status ) );
+            m_sock->~Socket();
+            tracy_free( m_sock );
+            m_sock = nullptr;
+            if( !connectRefusedWarned )
+            {
+                connectRefusedWarned = true;
+                fprintf( stderr, "Tracy Profiler connect timeout: connection refused; no client connected within the %lld s window.\n",
+                    (long long)std::chrono::duration_cast<std::chrono::seconds>( m_connectTimeout ).count() );
+            }
+            continue;
+        }
+#endif
 
 #ifdef TRACY_ON_DEMAND
         while( m_symbolsBusy.load( std::memory_order_acquire ) ) { YieldThread(); }
@@ -2094,6 +2145,7 @@ void Profiler::Worker()
 
 #ifndef TRACY_ON_DEMAND
         // Client is no longer available here. Accept incoming connections, but reject handshake.
+        SuppressEmit();
         for(;;)
         {
             if( ShouldExit() )
@@ -4463,11 +4515,7 @@ extern "C" {
 TRACY_API TracyCZoneCtx ___tracy_emit_zone_begin( const struct ___tracy_source_location_data* srcloc, int32_t active )
 {
     ___tracy_c_zone_context ctx;
-#ifdef TRACY_ON_DEMAND
-    ctx.active = active && tracy::GetProfiler().IsConnected();
-#else
-    ctx.active = active;
-#endif
+    ctx.active = active && !tracy::GetProfiler().IsEmitSuppressed();
     if( !ctx.active ) return ctx;
     const auto id = tracy::GetProfiler().GetNextZoneId();
     ctx.id = id;
@@ -4491,11 +4539,7 @@ TRACY_API TracyCZoneCtx ___tracy_emit_zone_begin( const struct ___tracy_source_l
 TRACY_API TracyCZoneCtx ___tracy_emit_zone_begin_callstack( const struct ___tracy_source_location_data* srcloc, int32_t depth, int32_t active )
 {
     ___tracy_c_zone_context ctx;
-#ifdef TRACY_ON_DEMAND
-    ctx.active = active && tracy::GetProfiler().IsConnected();
-#else
-    ctx.active = active;
-#endif
+    ctx.active = active && !tracy::GetProfiler().IsEmitSuppressed();
     if( !ctx.active ) return ctx;
     const auto id = tracy::GetProfiler().GetNextZoneId();
     ctx.id = id;
@@ -4524,11 +4568,7 @@ TRACY_API TracyCZoneCtx ___tracy_emit_zone_begin_callstack( const struct ___trac
 TRACY_API TracyCZoneCtx ___tracy_emit_zone_begin_alloc( uint64_t srcloc, int32_t active )
 {
     ___tracy_c_zone_context ctx;
-#ifdef TRACY_ON_DEMAND
-    ctx.active = active && tracy::GetProfiler().IsConnected();
-#else
-    ctx.active = active;
-#endif
+    ctx.active = active && !tracy::GetProfiler().IsEmitSuppressed();
     if( !ctx.active )
     {
         tracy::tracy_free( (void*)srcloc );
@@ -4556,11 +4596,7 @@ TRACY_API TracyCZoneCtx ___tracy_emit_zone_begin_alloc( uint64_t srcloc, int32_t
 TRACY_API TracyCZoneCtx ___tracy_emit_zone_begin_alloc_callstack( uint64_t srcloc, int32_t depth, int32_t active )
 {
     ___tracy_c_zone_context ctx;
-#ifdef TRACY_ON_DEMAND
-    ctx.active = active && tracy::GetProfiler().IsConnected();
-#else
-    ctx.active = active;
-#endif
+    ctx.active = active && !tracy::GetProfiler().IsEmitSuppressed();
     if( !ctx.active )
     {
         tracy::tracy_free( (void*)srcloc );

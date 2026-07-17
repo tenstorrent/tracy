@@ -3,6 +3,7 @@
 
 #include <assert.h>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <stdint.h>
 #include <string.h>
@@ -340,9 +341,7 @@ public:
     static tracy_force_inline void SendFrameMark( const char* name )
     {
         if( !name ) GetProfiler().m_frameCount.fetch_add( 1, std::memory_order_relaxed );
-#ifdef TRACY_ON_DEMAND
-        if( !GetProfiler().IsConnected() ) return;
-#endif
+        if( GetProfiler().IsEmitSuppressed() ) return;
         auto item = QueueSerial();
         MemWrite( &item->hdr.type, QueueType::FrameMarkMsg );
         MemWrite( &item->frameMark.time, GetTime() );
@@ -353,9 +352,7 @@ public:
     static tracy_force_inline void SendFrameMark( const char* name, QueueType type )
     {
         assert( type == QueueType::FrameMarkMsgStart || type == QueueType::FrameMarkMsgEnd );
-#ifdef TRACY_ON_DEMAND
-        if( !GetProfiler().IsConnected() ) return;
-#endif
+        if( GetProfiler().IsEmitSuppressed() ) return;
         auto item = QueueSerial();
         MemWrite( &item->hdr.type, type );
         MemWrite( &item->frameMark.time, GetTime() );
@@ -368,9 +365,7 @@ public:
 #ifndef TRACY_NO_FRAME_IMAGE
         auto& profiler = GetProfiler();
         assert( profiler.m_frameCount.load( std::memory_order_relaxed ) < (std::numeric_limits<uint32_t>::max)() );
-#  ifdef TRACY_ON_DEMAND
-        if( !profiler.IsConnected() ) return;
-#  endif
+        if( profiler.IsEmitSuppressed() ) return;
         const auto sz = size_t( w ) * size_t( h ) * 4;
         auto ptr = (char*)tracy_malloc( sz );
         memcpy( ptr, image, sz );
@@ -395,9 +390,7 @@ public:
 
     static tracy_force_inline void PlotData( const char* name, int64_t val )
     {
-#ifdef TRACY_ON_DEMAND
-        if( !GetProfiler().IsConnected() ) return;
-#endif
+        if( GetProfiler().IsEmitSuppressed() ) return;
         TracyLfqPrepare( QueueType::PlotDataInt );
         MemWrite( &item->plotDataInt.name, (uint64_t)name );
         MemWrite( &item->plotDataInt.time, GetTime() );
@@ -407,9 +400,7 @@ public:
 
     static tracy_force_inline void PlotData( const char* name, float val )
     {
-#ifdef TRACY_ON_DEMAND
-        if( !GetProfiler().IsConnected() ) return;
-#endif
+        if( GetProfiler().IsEmitSuppressed() ) return;
         TracyLfqPrepare( QueueType::PlotDataFloat );
         MemWrite( &item->plotDataFloat.name, (uint64_t)name );
         MemWrite( &item->plotDataFloat.time, GetTime() );
@@ -419,9 +410,7 @@ public:
 
     static tracy_force_inline void PlotData( const char* name, double val )
     {
-#ifdef TRACY_ON_DEMAND
-        if( !GetProfiler().IsConnected() ) return;
-#endif
+        if( GetProfiler().IsEmitSuppressed() ) return;
         TracyLfqPrepare( QueueType::PlotDataDouble );
         MemWrite( &item->plotDataDouble.name, (uint64_t)name );
         MemWrite( &item->plotDataDouble.time, GetTime() );
@@ -448,9 +437,7 @@ public:
     static tracy_force_inline void LogString( MessageSourceType source, MessageSeverity severity, uint32_t color, int32_t callstack_depth, size_t txtLength, const char* txt )
     {
         assert( txtLength < (std::numeric_limits<uint16_t>::max)() );
-#ifdef TRACY_ON_DEMAND
-        if( !GetProfiler().IsConnected() ) return;
-#endif
+        if( GetProfiler().IsEmitSuppressed() ) return;
         if( callstack_depth != 0 && has_callstack() )
         {
             tracy::GetProfiler().SendCallstack( callstack_depth );
@@ -483,9 +470,7 @@ public:
 
     static tracy_force_inline void LogString( MessageSourceType source, MessageSeverity severity, uint32_t color, int32_t callstack_depth, const char* txt )
     {
-#ifdef TRACY_ON_DEMAND
-        if( !GetProfiler().IsConnected() ) return;
-#endif
+        if( GetProfiler().IsEmitSuppressed() ) return;
         if( callstack_depth != 0 && has_callstack() )
         {
             tracy::GetProfiler().SendCallstack( callstack_depth );
@@ -535,9 +520,7 @@ public:
     static tracy_force_inline void MemAlloc( const void* ptr, size_t size, bool secure )
     {
         if( secure && !ProfilerAvailable() ) return;
-#ifdef TRACY_ON_DEMAND
-        if( !GetProfiler().IsConnected() ) return;
-#endif
+        if( GetProfiler().IsEmitSuppressed() ) return;
         const auto thread = GetThreadHandle();
 
         GetProfiler().m_serialLock.lock();
@@ -548,9 +531,7 @@ public:
     static tracy_force_inline void MemFree( const void* ptr, bool secure )
     {
         if( secure && !ProfilerAvailable() ) return;
-#ifdef TRACY_ON_DEMAND
-        if( !GetProfiler().IsConnected() ) return;
-#endif
+        if( GetProfiler().IsEmitSuppressed() ) return;
         const auto thread = GetThreadHandle();
 
         GetProfiler().m_serialLock.lock();
@@ -564,9 +545,7 @@ public:
         if( depth > 0 && has_callstack() )
         {
             auto& profiler = GetProfiler();
-#  ifdef TRACY_ON_DEMAND
-            if( !profiler.IsConnected() ) return;
-#  endif
+            if( profiler.IsEmitSuppressed() ) return;
             const auto thread = GetThreadHandle();
 
             auto callstack = Callstack( depth );
@@ -593,9 +572,7 @@ public:
         if( depth > 0 && has_callstack() )
         {
             auto& profiler = GetProfiler();
-#  ifdef TRACY_ON_DEMAND
-            if( !profiler.IsConnected() ) return;
-#  endif
+            if( profiler.IsEmitSuppressed() ) return;
             const auto thread = GetThreadHandle();
 
             auto callstack = Callstack( depth );
@@ -614,9 +591,7 @@ public:
     static tracy_force_inline void MemAllocNamed( const void* ptr, size_t size, bool secure, const char* name )
     {
         if( secure && !ProfilerAvailable() ) return;
-#ifdef TRACY_ON_DEMAND
-        if( !GetProfiler().IsConnected() ) return;
-#endif
+        if( GetProfiler().IsEmitSuppressed() ) return;
         const auto thread = GetThreadHandle();
 
         GetProfiler().m_serialLock.lock();
@@ -628,9 +603,7 @@ public:
     static tracy_force_inline void MemFreeNamed( const void* ptr, bool secure, const char* name )
     {
         if( secure && !ProfilerAvailable() ) return;
-#ifdef TRACY_ON_DEMAND
-        if( !GetProfiler().IsConnected() ) return;
-#endif
+        if( GetProfiler().IsEmitSuppressed() ) return;
         const auto thread = GetThreadHandle();
 
         GetProfiler().m_serialLock.lock();
@@ -645,9 +618,7 @@ public:
         if( depth > 0 && has_callstack() )
         {
             auto& profiler = GetProfiler();
-#  ifdef TRACY_ON_DEMAND
-            if( !profiler.IsConnected() ) return;
-#  endif
+            if( profiler.IsEmitSuppressed() ) return;
             const auto thread = GetThreadHandle();
 
             auto callstack = Callstack( depth );
@@ -670,9 +641,7 @@ public:
         if( depth > 0 && has_callstack() )
         {
             auto& profiler = GetProfiler();
-#  ifdef TRACY_ON_DEMAND
-            if( !profiler.IsConnected() ) return;
-#  endif
+            if( profiler.IsEmitSuppressed() ) return;
             const auto thread = GetThreadHandle();
 
             auto callstack = Callstack( depth );
@@ -692,9 +661,7 @@ public:
     static tracy_force_inline void MemDiscard( const char* name, bool secure )
     {
         if( secure && !ProfilerAvailable() ) return;
-#ifdef TRACY_ON_DEMAND
-        if( !GetProfiler().IsConnected() ) return;
-#endif
+        if( GetProfiler().IsEmitSuppressed() ) return;
         const auto thread = GetThreadHandle();
 
         GetProfiler().m_serialLock.lock();
@@ -707,9 +674,7 @@ public:
         if( secure && !ProfilerAvailable() ) return;
         if( depth > 0 && has_callstack() )
         {
-#  ifdef TRACY_ON_DEMAND
-            if( !GetProfiler().IsConnected() ) return;
-#  endif
+            if( GetProfiler().IsEmitSuppressed() ) return;
             const auto thread = GetThreadHandle();
 
             auto callstack = Callstack( depth );
@@ -768,9 +733,7 @@ public:
 #ifdef TRACY_FIBERS
     static tracy_force_inline void EnterFiber( const char* fiber, int32_t groupHint )
     {
-#ifdef TRACY_ON_DEMAND
-        if( !GetProfiler().IsConnected() ) return;
-#endif
+        if( GetProfiler().IsEmitSuppressed() ) return;
         TracyQueuePrepare( QueueType::FiberEnter );
         MemWrite( &item->fiberEnter.time, GetTime() );
         MemWrite( &item->fiberEnter.fiber, (uint64_t)fiber );
@@ -780,9 +743,7 @@ public:
 
     static tracy_force_inline void LeaveFiber()
     {
-#ifdef TRACY_ON_DEMAND
-        if( !GetProfiler().IsConnected() ) return;
-#endif
+        if( GetProfiler().IsEmitSuppressed() ) return;
         TracyQueuePrepare( QueueType::FiberLeave );
         MemWrite( &item->fiberLeave.time, GetTime() );
         TracyQueueCommit( fiberLeave );
@@ -798,6 +759,18 @@ public:
     {
         return m_isConnected.load( std::memory_order_acquire );
     }
+
+    // Producer emission gate: suppressed once the connect-timeout grace window lapses or if the server is not connected in on-demand mode.
+    tracy_force_inline bool IsEmitSuppressed() const
+    {
+#ifdef TRACY_ON_DEMAND
+        return !IsConnected();
+#else
+        return m_emitSuppressed.load( std::memory_order_relaxed );
+#endif
+    }
+
+    tracy_force_inline void SuppressEmit() { m_emitSuppressed.store( true, std::memory_order_relaxed ); }
 
     tracy_force_inline void SetProgramName( const char* name )
     {
@@ -1056,6 +1029,7 @@ private:
     UdpBroadcast* m_broadcast;
     bool m_noExit;
     uint32_t m_userPort;
+    std::chrono::nanoseconds m_connectTimeout;
     std::atomic<uint32_t> m_zoneId;
     int64_t m_samplingPeriod;
 
@@ -1086,6 +1060,7 @@ private:
 
     std::atomic<uint64_t> m_frameCount;
     std::atomic<bool> m_isConnected;
+    std::atomic<bool> m_emitSuppressed;
 #ifdef TRACY_ON_DEMAND
     std::atomic<uint64_t> m_connectionId;
     std::atomic<bool> m_symbolsBusy;
