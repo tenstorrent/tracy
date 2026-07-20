@@ -370,6 +370,8 @@ void View::DrawTimeline()
         {
             m_tc.AddItem<TimelineItemGpu>( v );
         }
+        // Items now exist, so a selection loaded from disk can be applied.
+        ApplyPendingGpuSelection();
     }
     if( m_vd.drawCpuData && m_worker.HasContextSwitches() )
     {

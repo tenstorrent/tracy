@@ -5,6 +5,8 @@
 #include <random>
 #include <string>
 
+#include "TracyCoreSelection.hpp"
+#include "TracyFileselector.hpp"
 #include "TracyFilesystem.hpp"
 #include "TracyImGui.hpp"
 #include "TracyMouse.hpp"
@@ -219,6 +221,50 @@ const char* View::GetGpuContextLabel( const GpuCtxData* gpu )
     return buf;
 }
 
+std::unordered_set<std::string> View::CollectVisibleGpuSelection()
+{
+    std::unordered_set<std::string> sel;
+    const auto& gpuData = m_worker.GetGpuData();
+    const auto& itemMap = m_tc.GetItemMap();
+    for( size_t i=0; i<gpuData.size(); i++ )
+    {
+        // Only contexts whose timeline item has been created have a meaningful
+        // visibility state; skip the rest.
+        auto it = itemMap.find( gpuData[i] );
+        if( it == itemMap.end() || !it->second->IsVisible() ) continue;
+        sel.emplace( GetGpuContextLabel( gpuData[i] ) );
+    }
+    return sel;
+}
+
+void View::ApplyGpuSelection( const std::unordered_set<std::string>& sel )
+{
+    const auto& gpuData = m_worker.GetGpuData();
+    for( size_t i=0; i<gpuData.size(); i++ )
+    {
+        const char* label = GetGpuContextLabel( gpuData[i] );
+        m_tc.GetItem( gpuData[i] ).SetVisible( sel.find( label ) != sel.end() );
+    }
+}
+
+void View::ApplyPendingGpuSelection()
+{
+    if( !m_pendingGpuSelection ) return;
+    ApplyGpuSelection( *m_pendingGpuSelection );
+    m_pendingGpuSelection.reset();
+}
+
+void View::SaveGpuSelection( const char* path )
+{
+    CoreSelection::Save( path, CollectVisibleGpuSelection() );
+}
+
+void View::LoadGpuSelection( const char* path )
+{
+    std::unordered_set<std::string> sel;
+    if( CoreSelection::Load( path, sel ) ) m_pendingGpuSelection = std::move( sel );
+}
+
 void View::DrawOptions()
 {
     static bool default_markers_active = false;
@@ -334,6 +380,38 @@ void View::DrawOptions()
 			m_tc.GetItem( gpuData[i] ).SetVisible( false );
 		}
 	    }
+
+#ifndef TRACY_NO_FILESELECTOR
+            const std::string coreSelDir = CoreSelection::DirPath();
+            const char* coreSelDefault = coreSelDir.empty() ? nullptr : coreSelDir.c_str();
+            ImGui::SameLine();
+            if( ImGui::SmallButton( ICON_FA_FLOPPY_DISK ) )
+            {
+                Fileselector::SaveFile( "coresel", "Tracy core selection", [this]( const char* fn ) {
+                    SaveGpuSelection( fn );
+                }, coreSelDefault );
+            }
+            if( ImGui::IsItemHovered() ) ImGui::SetTooltip( "Save core selection" );
+            ImGui::SameLine();
+            if( ImGui::SmallButton( ICON_FA_FOLDER_OPEN ) ) ImGui::OpenPopup( "CoreSelLoad" );
+            if( ImGui::IsItemHovered() ) ImGui::SetTooltip( "Load core selection" );
+            if( ImGui::BeginPopup( "CoreSelLoad" ) )
+            {
+                const auto saved = CoreSelection::List();
+                for( const auto& s : saved )
+                {
+                    if( ImGui::Selectable( s.first.c_str() ) ) LoadGpuSelection( s.second.c_str() );
+                }
+                if( !saved.empty() ) ImGui::Separator();
+                if( ImGui::Selectable( ICON_FA_FOLDER_OPEN " Browse..." ) )
+                {
+                    Fileselector::OpenFile( "coresel", "Tracy core selection", [this]( const char* fn ) {
+                        LoadGpuSelection( fn );
+                    }, coreSelDefault );
+                }
+                ImGui::EndPopup();
+            }
+#endif
 
             ImGui::SetNextItemWidth( 200 * scale );
             ImGui::InputTextWithHint( "##gpufilter", ICON_FA_FILTER " Filter GPU contexts", m_gpuFilterBuf, 256 );

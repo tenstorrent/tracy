@@ -14,6 +14,7 @@
 #include "imgui.h"
 
 #include "TracyConfig.hpp"
+#include "TracyCoreSelection.hpp"
 #include "TracyFileRead.hpp"
 #include "TracyFilesystem.hpp"
 #include "TracyImGui.hpp"
@@ -110,6 +111,7 @@ View::View( void(*cbMainThread)(const std::function<void()>&, bool), FileRead& f
     m_userData.LoadState( m_vd );
     m_userData.LoadAnnotations( m_annotations );
     m_sourceRegexValid = m_userData.LoadSourceSubstitutions( m_sourceSubstitutions );
+    LoadGpuSelection( CoreSelection::LatestPath() );
 
     if( m_worker.GetCallstackSampleCount() == 0 ) m_showAllSymbols = true;
 
@@ -123,6 +125,8 @@ View::~View()
     m_userData.SaveState( m_vd );
     m_userData.SaveAnnotations( m_annotations );
     m_userData.SaveSourceSubstitutions( m_sourceSubstitutions );
+
+    if( !m_worker.GetGpuData().empty() ) SaveGpuSelection( CoreSelection::LatestPath() );
 
     if( m_compare.loadThread.joinable() ) m_compare.loadThread.join();
     if( m_saveThread.joinable() ) m_saveThread.join();
