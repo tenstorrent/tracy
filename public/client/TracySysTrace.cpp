@@ -85,9 +85,7 @@ static t_GetThreadDescription _GetThreadDescription = 0;
 
 void WINAPI EventRecordCallback( PEVENT_RECORD record )
 {
-#ifdef TRACY_ON_DEMAND
-    if( !GetProfiler().IsConnected() ) return;
-#endif
+    if( GetProfiler().IsEmitSuppressed() ) return;
 
     const auto& hdr = record->EventHeader;
     // WARN: doing a fast switch-match below with the top 32 bits of the GUID
@@ -1118,8 +1116,7 @@ void SysTraceWorker( void* ptr )
     for( int i=0; i<numBuffers; i++ ) ringArray[i].Enable();
     for(;;)
     {
-#ifdef TRACY_ON_DEMAND
-        if( !GetProfiler().IsConnected() )
+        if( GetProfiler().IsEmitSuppressed() )
         {
             if( !traceActive.load( std::memory_order_relaxed ) ) break;
             for( int i=0; i<numBuffers; i++ )
@@ -1137,7 +1134,6 @@ void SysTraceWorker( void* ptr )
             std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
             continue;
         }
-#endif
 
         bool hadData = false;
         for( int i=0; i<ctxBufferIdx; i++ )
