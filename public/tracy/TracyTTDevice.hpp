@@ -7,6 +7,7 @@
 #define TracyTTDestroy(c)
 #define TracyTTContextName(c, x, y)
 #define TracyTTContextPopulate(c, x, y, z)
+#define TracyTTContextPopulateCalibrated(c, x, y, z)
 #define TracyTTPushStartZone(c, e)
 #define TracyTTPushEndZone(c, e)
 
@@ -111,6 +112,30 @@ namespace tracy {
             MemWrite(&item->gpuNewContext.flags, (uint8_t)0);
             Profiler::QueueSerialFinish();
 
+            mm_tcpu = tcpu;
+        }
+
+        // Same anchor mapping as PopulateTTContext but marks the context CALIBRATED, so the Tracy GUI does
+        // NOT show the per-context manual "Drift (ns/s)/Auto" control (server shows it only when
+        // !hasCalibration). We send NO GpuCalibration events, so calibrationMod stays 1.0 and the mapping is
+        // identical to the uncalibrated path (gpuTime = tgpu + timeDiff either way). For consumers whose
+        // device timestamps are host-rebased (perf-debug profiler): the anchor is exact, no drift wanted.
+        void PopulateTTContextCalibrated(int64_t tcpu, double tgpu, double frequency) {
+            m_frequency = frequency;
+            m_tgpu = tgpu;
+            if (tcpu == 0) {
+                tcpu = m_tcpu;
+            }
+            auto item = Profiler::QueueSerial();
+            MemWrite(&item->hdr.type, QueueType::GpuNewContext);
+            MemWrite(&item->gpuNewContext.cpuTime, tcpu);
+            MemWrite(&item->gpuNewContext.gpuTime, (int64_t)round((double)m_tgpu / m_frequency));
+            memset(&item->gpuNewContext.thread, 0, sizeof(item->gpuNewContext.thread));
+            MemWrite(&item->gpuNewContext.period, (float)1.0f);
+            MemWrite(&item->gpuNewContext.type, GpuContextType::tt_device);
+            MemWrite(&item->gpuNewContext.context, GetId());
+            MemWrite(&item->gpuNewContext.flags, (uint8_t)GpuContextCalibration);
+            Profiler::QueueSerialFinish();
             mm_tcpu = tcpu;
         }
 
@@ -303,6 +328,8 @@ using TracyTTCtx = tracy::TTCtx*;
 #define TracyTTDestroy(ctx) tracy::DestroyTTContext(ctx)
 #define TracyTTContextName(ctx, name, size) ctx->Name(name, size)
 #define TracyTTContextPopulate(ctx, cpuTime, timeshift, frequency) ctx->PopulateTTContext(cpuTime, timeshift, frequency)
+#define TracyTTContextPopulateCalibrated(ctx, cpuTime, timeshift, frequency) \
+    ctx->PopulateTTContextCalibrated(cpuTime, timeshift, frequency)
 #define TracyTTContextCalibrate(ctx, cpuTime, timeshift, frequency) ctx->CalibrateTTContext(cpuTime, timeshift, frequency)
 #define TracyTTPushStartMarker(ctx, marker) ctx->PushStartMarker(marker)
 #define TracyTTPushEndMarker(ctx, marker) ctx->PushEndMarker(marker)
