@@ -131,7 +131,11 @@ namespace tracy {
             MemWrite(&item->gpuNewContext.cpuTime, tcpu);
             MemWrite(&item->gpuNewContext.gpuTime, (int64_t)round((double)m_tgpu / m_frequency));
             memset(&item->gpuNewContext.thread, 0, sizeof(item->gpuNewContext.thread));
-            MemWrite(&item->gpuNewContext.period, (float)1.0f);
+            // period = ns per device cycle = 1/frequency (frequency is cycles/ns = aiclk_MHz/1000). The
+            // perf-debug profiler pushes raw device CYCLES as timestamps, so this is what converts them to
+            // real ns in the Tracy GUI. Hardcoding 1.0 (the old value) assumed a 1 GHz clock and mis-scaled
+            // every duration by aiclk/1000 (e.g. 0.8x at 800 MHz).
+            MemWrite(&item->gpuNewContext.period, (float)(m_frequency > 0.0 ? 1.0 / m_frequency : 1.0));
             MemWrite(&item->gpuNewContext.type, GpuContextType::tt_device);
             MemWrite(&item->gpuNewContext.context, GetId());
             MemWrite(&item->gpuNewContext.flags, (uint8_t)GpuContextCalibration);
