@@ -25,7 +25,17 @@ enum class RiscType : uint8_t {
     ERISC,
     TENSIX_RISC_AGG,  // TENSIX_RISC_AGG represents all the Tensix RISCs on device, but it itself isn't a RISC
                       // defined on the device
-    NONE              // No RISC label displayed (used for host-side telemetry contexts)
+    NONE,             // No RISC label displayed (used for host-side telemetry contexts)
+    // X280 L2CPU drain harts (bare-metal profiler) -- their own lane labels within one X280 context. Values
+    // 8..15 need RISC_BIT_COUNT>=4 (see below). rd = reader hart, relay = relay hart.
+    X280_RD0 = 8,
+    X280_RD1,
+    X280_RD2,
+    X280_RD3,
+    X280_RELAY0,
+    X280_RELAY1,
+    X280_RELAY2,
+    X280_RELAY3
 };
 
 enum class TTDeviceMarkerType : uint8_t { ZONE_START, ZONE_END, ZONE_TOTAL, TS_DATA, TS_EVENT, TS_DATA_16B };
@@ -89,7 +99,7 @@ struct MarkerDetails {
 const MarkerDetails UnidentifiedMarkerDetails = MarkerDetails("", "", 0);
 
 struct TTDeviceMarker {
-    static constexpr uint64_t RISC_BIT_COUNT = 3;
+    static constexpr uint64_t RISC_BIT_COUNT = 4;  // 0..15: 0-7 Tensix/eth/none, 8-15 X280 drain harts
     static constexpr uint64_t CORE_X_BIT_COUNT = 4;
     static constexpr uint64_t CORE_Y_BIT_COUNT = 4;
     static constexpr uint64_t CHIP_BIT_COUNT = 8;
