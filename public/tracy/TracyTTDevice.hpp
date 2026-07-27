@@ -131,11 +131,13 @@ namespace tracy {
             MemWrite(&item->gpuNewContext.cpuTime, tcpu);
             MemWrite(&item->gpuNewContext.gpuTime, (int64_t)round((double)m_tgpu / m_frequency));
             memset(&item->gpuNewContext.thread, 0, sizeof(item->gpuNewContext.thread));
-            // period = ns per device cycle = 1/frequency (frequency is cycles/ns = aiclk_MHz/1000). The
-            // perf-debug profiler pushes raw device CYCLES as timestamps, so this is what converts them to
-            // real ns in the Tracy GUI. Hardcoding 1.0 (the old value) assumed a 1 GHz clock and mis-scaled
-            // every duration by aiclk/1000 (e.g. 0.8x at 800 MHz).
-            MemWrite(&item->gpuNewContext.period, (float)(m_frequency > 0.0 ? 1.0 / m_frequency : 1.0));
+            // period = ns per timestamp unit, and it MUST be 1.0 here: PushStartMarker/PushEndMarker already
+            // convert device cycles to ns themselves (they send `marker.timestamp / m_frequency`), so the
+            // values on the wire are ALREADY nanoseconds. An earlier revision set this to 1/frequency on the
+            // false premise that raw CYCLES were pushed -- that double-divided and shrank every device zone
+            // by exactly aiclk_GHz (a 6.38 us zone displayed as 4.73 us at 1.35 GHz). If you ever switch the
+            // push path to send raw cycles, change BOTH sites together.
+            MemWrite(&item->gpuNewContext.period, (float)1.0f);
             MemWrite(&item->gpuNewContext.type, GpuContextType::tt_device);
             MemWrite(&item->gpuNewContext.context, GetId());
             MemWrite(&item->gpuNewContext.flags, (uint8_t)GpuContextCalibration);
