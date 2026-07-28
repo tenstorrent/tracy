@@ -111,6 +111,12 @@ void TimelineItemGpu::HeaderTooltip( const char* label ) const
         TextFocused( "Appeared at", TimeToString( t0 ) );
     }
     TextFocused( "Zone count:", RealToString( m_gpu->count ) );
+    uint64_t markerCount = 0;
+    for( auto& td : m_gpu->threadData ) markerCount += td.second.markers.size();
+    if( markerCount != 0 )
+    {
+        TextFocused( "Event count:", RealToString( markerCount ) );
+    }
     if( m_gpu->period != 1.f )
     {
         TextFocused( "Timestamp accuracy:", TimeToString( m_gpu->period ) );
@@ -144,18 +150,26 @@ int64_t TimelineItemGpu::RangeBegin() const
     int64_t t = std::numeric_limits<int64_t>::max();
     for( auto& td : m_gpu->threadData )
     {
-        int64_t t0;
-        if( td.second.timeline.is_magic() )
+        // A lane can hold only markers, in which case its zone timeline is empty.
+        if( !td.second.timeline.empty() )
         {
-            t0 = ((Vector<GpuEvent>*)&td.second.timeline)->front().GpuStart();
+            int64_t t0;
+            if( td.second.timeline.is_magic() )
+            {
+                t0 = ((Vector<GpuEvent>*)&td.second.timeline)->front().GpuStart();
+            }
+            else
+            {
+                t0 = td.second.timeline.front()->GpuStart();
+            }
+            if( t0 >= 0 )
+            {
+                t = std::min( t, t0 );
+            }
         }
-        else
+        if( !td.second.markers.empty() )
         {
-            t0 = td.second.timeline.front()->GpuStart();
-        }
-        if( t0 >= 0 )
-        {
-            t = std::min( t, t0 );
+            t = std::min( t, td.second.markers.front()->gpuTime );
         }
     }
     return t;
@@ -166,25 +180,32 @@ int64_t TimelineItemGpu::RangeEnd() const
     int64_t t = std::numeric_limits<int64_t>::min();
     for( auto& td : m_gpu->threadData )
     {
-        int64_t t0;
-        if( td.second.timeline.is_magic() )
+        if( !td.second.timeline.empty() )
         {
-            t0 = ((Vector<GpuEvent>*)&td.second.timeline)->front().GpuStart();
-        }
-        else
-        {
-            t0 = td.second.timeline.front()->GpuStart();
-        }
-        if( t0 >= 0 )
-        {
+            int64_t t0;
             if( td.second.timeline.is_magic() )
             {
-                t = std::max( t, std::min( m_worker.GetLastTime(), m_worker.GetZoneEnd( ((Vector<GpuEvent>*)&td.second.timeline)->back() ) ) );
+                t0 = ((Vector<GpuEvent>*)&td.second.timeline)->front().GpuStart();
             }
             else
             {
-                t = std::max( t, std::min( m_worker.GetLastTime(), m_worker.GetZoneEnd( *td.second.timeline.back() ) ) );
+                t0 = td.second.timeline.front()->GpuStart();
             }
+            if( t0 >= 0 )
+            {
+                if( td.second.timeline.is_magic() )
+                {
+                    t = std::max( t, std::min( m_worker.GetLastTime(), m_worker.GetZoneEnd( ((Vector<GpuEvent>*)&td.second.timeline)->back() ) ) );
+                }
+                else
+                {
+                    t = std::max( t, std::min( m_worker.GetLastTime(), m_worker.GetZoneEnd( *td.second.timeline.back() ) ) );
+                }
+            }
+        }
+        if( !td.second.markers.empty() )
+        {
+            t = std::max( t, td.second.markers.back()->gpuTime );
         }
     }
     return t;

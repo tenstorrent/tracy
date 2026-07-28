@@ -1164,6 +1164,27 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks, bool allow
             }
         }
 
+        if( fileVer >= FileVersion( 0, 13, 4 ) )
+        {
+            uint64_t mtdsz;
+            f.Read( mtdsz );
+            for( uint64_t j=0; j<mtdsz; j++ )
+            {
+                uint64_t tid, msz;
+                f.Read2( tid, msz );
+                auto td = ctx->threadData.emplace( tid, GpuCtxThreadData {} ).first;
+                auto& vec = td->second.markers;
+                vec.reserve_exact( msz, m_slab );
+                for( uint64_t k=0; k<msz; k++ )
+                {
+                    auto marker = m_slab.Alloc<GpuMarkerData>();
+                    f.Read4( marker->gpuTime, marker->srcloc, marker->markerType, marker->meta );
+                    vec[k] = marker;
+                }
+                m_data.gpuMarkerCnt += msz;
+            }
+        }
+
         m_data.gpuData[i] = ctx;
     }
 
@@ -4684,6 +4705,12 @@ bool Worker::Process( const QueueItem& ev )
     case QueueType::GpuZoneAnnotation:
         ProcessGpuZoneAnnotation( ev.zoneAnnotation );
         break;
+    case QueueType::GpuMarkerMeta:
+        ProcessGpuMarkerMeta( ev.gpuMarkerMeta );
+        break;
+    case QueueType::GpuMarker:
+        ProcessGpuMarker( ev.gpuMarker );
+        break;
     case QueueType::MemAlloc:
         ProcessMemAlloc( ev.memAlloc );
         break;
@@ -6034,6 +6061,34 @@ void Worker::ProcessGpuZoneEnd( const QueueGpuZoneEnd& ev, bool serial )
     if( m_data.lastTime < time ) m_data.lastTime = time;
 }
 
+// Map a device timestamp onto the host clock. Shared by zone timing and device markers so that
+// events and zones on the same lane cannot end up on different time bases.
+static int64_t ConvertGpuTime( const GpuCtxData* ctx, int64_t tgpu )
+{
+    if( !ctx->hasPeriod )
+    {
+        if( !ctx->hasCalibration )
+        {
+            return tgpu + ctx->timeDiff;
+        }
+        else
+        {
+            return int64_t( ( tgpu - ctx->calibratedGpuTime ) * ctx->calibrationMod + ctx->calibratedCpuTime );
+        }
+    }
+    else
+    {
+        if( !ctx->hasCalibration )
+        {
+            return int64_t( double( ctx->period ) * tgpu ) + ctx->timeDiff;      // precision loss
+        }
+        else
+        {
+            return int64_t( ( double( ctx->period ) * tgpu - ctx->calibratedGpuTime ) * ctx->calibrationMod + ctx->calibratedCpuTime );
+        }
+    }
+}
+
 void Worker::ProcessGpuTime( const QueueGpuTime& ev )
 {
     auto ctx = m_gpuCtxMap[ev.context];
@@ -6054,29 +6109,7 @@ void Worker::ProcessGpuTime( const QueueGpuTime& ev )
         tgpu += ctx->overflow * ctx->overflowMul;
     }
 
-    int64_t gpuTime;
-    if( !ctx->hasPeriod )
-    {
-        if( !ctx->hasCalibration )
-        {
-            gpuTime = tgpu + ctx->timeDiff;
-        }
-        else
-        {
-            gpuTime = int64_t( ( tgpu - ctx->calibratedGpuTime ) * ctx->calibrationMod + ctx->calibratedCpuTime );
-        }
-    }
-    else
-    {
-        if( !ctx->hasCalibration )
-        {
-            gpuTime = int64_t( double( ctx->period ) * tgpu ) + ctx->timeDiff;      // precision loss
-        }
-        else
-        {
-            gpuTime = int64_t( ( double( ctx->period ) * tgpu - ctx->calibratedGpuTime ) * ctx->calibrationMod + ctx->calibratedCpuTime );
-        }
-    }
+    const int64_t gpuTime = ConvertGpuTime( ctx.get(), tgpu );
 
     auto zone = ctx->query[ev.queryId];
     assert( zone );
@@ -6184,6 +6217,55 @@ void Worker::ProcessGpuZoneAnnotation( const QueueGpuZoneAnnotation& ev )
       note->second.reserve( ctx->noteNames.size() );
     }
     note->second[ev.noteId] = ev.value;
+}
+
+void Worker::ProcessGpuMarkerMeta( const QueueGpuMarkerMeta& ev )
+{
+    m_pendingGpuMarkerMeta = StringIdx( GetSingleStringIdx() );
+    m_hasPendingGpuMarkerMeta = true;
+}
+
+void Worker::ProcessGpuMarker( const QueueGpuMarker& ev )
+{
+    auto ctx = m_gpuCtxMap[ev.context];
+    assert( ctx );
+    assert( m_pendingSourceLocationPayload != 0 );
+
+    auto marker = m_slab.Alloc<GpuMarkerData>();
+    marker->srcloc = m_pendingSourceLocationPayload;
+    m_pendingSourceLocationPayload = 0;
+    marker->markerType = ev.markerType;
+    if( m_hasPendingGpuMarkerMeta )
+    {
+        marker->meta = m_pendingGpuMarkerMeta;
+        m_hasPendingGpuMarkerMeta = false;
+    }
+    else
+    {
+        marker->meta = StringIdx();
+    }
+
+    // Read-only about overflow: the wrap state is owned by ProcessGpuTime, which tracks it off the
+    // zone timestamps.
+    int64_t tgpu = RefTime( m_refTimeGpu, ev.gpuTime );
+    if( ctx->overflow != 0 ) tgpu += ctx->overflow * ctx->overflowMul;
+    marker->gpuTime = ConvertGpuTime( ctx.get(), tgpu );
+
+    auto& vec = ctx->threadData[ev.thread].markers;
+    if( vec.empty() || vec.back()->gpuTime <= marker->gpuTime )
+    {
+        vec.push_back( marker );
+    }
+    else
+    {
+        // The GUI binary searches this, so keep it sorted. Device markers normally arrive in time
+        // order per lane, making this the rare path.
+        auto it = std::upper_bound( vec.begin(), vec.end(), marker->gpuTime, [] ( const auto& lhs, const auto& rhs ) { return lhs < rhs->gpuTime; } );
+        vec.insert( it, short_ptr<GpuMarkerData>( marker ) );
+    }
+
+    m_data.gpuMarkerCnt++;
+    if( m_data.lastTime < marker->gpuTime ) m_data.lastTime = marker->gpuTime;
 }
 
 MemEvent* Worker::ProcessMemAllocImpl( MemData& memdata, const QueueMemAlloc& ev )
@@ -8383,6 +8465,25 @@ void Worker::Write( FileWrite& f, bool fiDict )
             {
                 f.Write( &note.first, sizeof( note.first ) );
                 f.Write( &note.second, sizeof( note.second ) );
+            }
+        }
+
+        sz = 0;
+        for( auto& td : ctx->threadData ) if( !td.second.markers.empty() ) sz++;
+        f.Write( &sz, sizeof( sz ) );
+        for( auto& td : ctx->threadData )
+        {
+            if( td.second.markers.empty() ) continue;
+            uint64_t tid = td.first;
+            f.Write( &tid, sizeof( tid ) );
+            sz = td.second.markers.size();
+            f.Write( &sz, sizeof( sz ) );
+            for( auto& marker : td.second.markers )
+            {
+                f.Write( &marker->gpuTime, sizeof( marker->gpuTime ) );
+                f.Write( &marker->srcloc, sizeof( marker->srcloc ) );
+                f.Write( &marker->markerType, sizeof( marker->markerType ) );
+                f.Write( &marker->meta, sizeof( marker->meta ) );
             }
         }
     }

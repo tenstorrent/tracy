@@ -2397,6 +2397,14 @@ static void FreeAssociatedMemory( const QueueItem& item )
         ptr = MemRead<uint64_t>( &item.gpuZoneBegin.srcloc );
         tracy_free( (void*)ptr );
         break;
+    case QueueType::GpuMarker:
+        ptr = MemRead<uint64_t>( &item.gpuMarker.srcloc );
+        tracy_free( (void*)ptr );
+        break;
+    case QueueType::GpuMarkerMeta:
+        ptr = MemRead<uint64_t>( &item.gpuMarkerMetaFat.ptr );
+        tracy_free( (void*)ptr );
+        break;
     case QueueType::CallstackSerial:
     case QueueType::Callstack:
         ptr = MemRead<uint64_t>( &item.callstackFat.ptr );
@@ -3134,6 +3142,25 @@ Profiler::DequeueStatus Profiler::DequeueSerial()
                     ptr = MemRead<uint64_t>( &item->gpuAnnotationNameFat.ptr );
                     uint16_t size = MemRead<uint16_t>( &item->gpuAnnotationNameFat.size );
                     SendSingleString( (const char*)ptr, size );
+                    tracy_free_fast( (void*)ptr );
+                    break;
+                }
+                case QueueType::GpuMarkerMeta:
+                {
+                    ptr = MemRead<uint64_t>( &item->gpuMarkerMetaFat.ptr );
+                    uint16_t size = MemRead<uint16_t>( &item->gpuMarkerMetaFat.size );
+                    SendSingleString( (const char*)ptr, size );
+                    tracy_free_fast( (void*)ptr );
+                    break;
+                }
+                case QueueType::GpuMarker:
+                {
+                    int64_t t = MemRead<int64_t>( &item->gpuMarker.gpuTime );
+                    int64_t dt = t - refGpu;
+                    refGpu = t;
+                    MemWrite( &item->gpuMarker.gpuTime, dt );
+                    ptr = MemRead<uint64_t>( &item->gpuMarker.srcloc );
+                    SendSourceLocationPayload( ptr );
                     tracy_free_fast( (void*)ptr );
                     break;
                 }

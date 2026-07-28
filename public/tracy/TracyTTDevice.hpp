@@ -10,6 +10,7 @@
 #define TracyTTContextPopulateCalibrated(c, x, y, z)
 #define TracyTTPushStartZone(c, e)
 #define TracyTTPushEndZone(c, e)
+#define TracyTTPushMarker(c, e)
 
 #define TracyGetTimerMul() 0
 #define TracyGetBaseTime() 0
@@ -25,8 +26,10 @@ using TracyTTCtx = void*;
 
 #else
 
+#include <algorithm>
 #include <atomic>
 #include <cassert>
+#include <limits>
 #include <sstream>
 #include <fstream>
 #include <cmath>
@@ -241,6 +244,42 @@ namespace tracy {
             }
         }
 
+        // One "key: value" per line; the GUI prints these verbatim in the marker tooltip. Everything
+        // that varies from event to event belongs here rather than in the interned source location.
+        std::string getMarkerMetaString(const TTDeviceMarker& marker) {
+            std::string meta;
+            const auto append = [&meta](const std::string& key, const std::string& value) {
+                if (!meta.empty()) {
+                    meta += '\n';
+                }
+                meta += key + ": " + value;
+            };
+
+            if (!marker.op_name.empty()) {
+                append("Op name", marker.op_name);
+            }
+            if (marker.runtime_host_id != TTDeviceMarker::INVALID_NUM) {
+                append("Op ID", std::to_string(marker.runtime_host_id));
+            }
+            if (marker.trace_id != TTDeviceMarker::INVALID_NUM) {
+                append("Trace ID", std::to_string(marker.trace_id));
+            }
+            if (marker.data != TTDeviceMarker::INVALID_NUM) {
+                append("Data", std::to_string(marker.data));
+            }
+            if (marker.data_high != TTDeviceMarker::INVALID_NUM) {
+                append("Data high", std::to_string(marker.data_high));
+            }
+#ifdef TRACY_TT_HAS_FULL_DEPS
+            for (const auto& entry : marker.meta_data.items()) {
+                append(
+                    entry.key(),
+                    entry.value().is_string() ? entry.value().template get<std::string>() : entry.value().dump());
+            }
+#endif
+            return meta;
+        }
+
         void PushStartMarker(const TTDeviceMarker& marker) {
             if (tracy::GetProfiler().IsEmitSuppressed()) {
                 return;
@@ -274,6 +313,46 @@ namespace tracy {
             MemWrite(&zoneTime->gpuTime.gpuTime, (uint64_t)round((double)marker.timestamp / m_frequency));
             MemWrite(&zoneTime->gpuTime.queryId, (uint16_t)queryId);
             MemWrite(&zoneTime->gpuTime.context, this->GetId());
+            Profiler::QueueSerialFinish();
+        }
+
+        // A point-in-time device event (TS_EVENT / TS_DATA / TS_DATA_16B) rather than a zone. The
+        // source location carries only the event's identity so that the server interns one per event
+        // type; everything that varies per event goes in the metadata string.
+        void PushMarker(const TTDeviceMarker& marker) {
+            const tracy::Color::ColorType color = this->getMarkerColor(marker);
+
+            const auto srcloc = Profiler::AllocSourceLocation(
+                marker.line,
+                marker.file.c_str(),
+                marker.file.length(),
+                "",
+                0,
+                marker.marker_name.c_str(),
+                marker.marker_name.length(),
+                color);
+
+            const std::string meta = this->getMarkerMetaString(marker);
+            if (!meta.empty()) {
+                const uint16_t metaLen = (uint16_t)std::min<size_t>(meta.length(), std::numeric_limits<uint16_t>::max());
+                auto ptr = (char*)tracy_malloc(metaLen);
+                memcpy(ptr, meta.c_str(), metaLen);
+
+                auto metaItem = Profiler::QueueSerial();
+                MemWrite(&metaItem->hdr.type, QueueType::GpuMarkerMeta);
+                MemWrite(&metaItem->gpuMarkerMetaFat.context, this->GetId());
+                MemWrite(&metaItem->gpuMarkerMetaFat.ptr, (uint64_t)ptr);
+                MemWrite(&metaItem->gpuMarkerMetaFat.size, metaLen);
+                Profiler::QueueSerialFinish();
+            }
+
+            auto item = Profiler::QueueSerial();
+            MemWrite(&item->hdr.type, QueueType::GpuMarker);
+            MemWrite(&item->gpuMarker.gpuTime, (int64_t)round((double)marker.timestamp / m_frequency));
+            MemWrite(&item->gpuMarker.srcloc, srcloc);
+            MemWrite(&item->gpuMarker.thread, (uint32_t)marker.get_thread_id());
+            MemWrite(&item->gpuMarker.context, this->GetId());
+            MemWrite(&item->gpuMarker.markerType, (uint8_t)marker.marker_type);
             Profiler::QueueSerialFinish();
         }
 
@@ -339,6 +418,7 @@ using TracyTTCtx = tracy::TTCtx*;
 #define TracyTTContextCalibrate(ctx, cpuTime, timeshift, frequency) ctx->CalibrateTTContext(cpuTime, timeshift, frequency)
 #define TracyTTPushStartMarker(ctx, marker) ctx->PushStartMarker(marker)
 #define TracyTTPushEndMarker(ctx, marker) ctx->PushEndMarker(marker)
+#define TracyTTPushMarker(ctx, marker) ctx->PushMarker(marker)
 
 #define TracyGetTimerMul() tracy::get_tracy_timer_mul()
 #define TracyGetBaseTime() tracy::get_tracy_base_time()

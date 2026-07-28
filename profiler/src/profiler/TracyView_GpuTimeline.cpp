@@ -72,64 +72,167 @@ bool View::DrawGpu( const TimelineContext& ctx, const GpuCtxData& gpu, int& offs
         TTDeviceMarker marker = TTDeviceMarker (tn);
         snprintf(buf, threadNameSize, "%s", GetRiscName(marker.risc).c_str());
         auto& tl = td.timeline;
-        assert( !tl.empty() );
-        if( tl.is_magic() )
-        {
-            auto& tlm = *(Vector<GpuEvent>*)&tl;
-            if( tlm.front().GpuStart() >= 0 )
-            {
-                const auto begin = tlm.front().GpuStart();
-                const auto drift = GpuDrift( &gpu );
-                offset += sstep;
-                const auto partDepth = DispatchGpuZoneLevel( tl, hover, pxns, int64_t( nspx ), wpos, offset, 0, gpu.thread, yMin, yMax, begin, drift );
-                if( partDepth != 0 )
-                {
-                    if( !singleThread )
-                    {
-                        ImGui::PushFont( g_fonts.normal, FontSmall );
-                        DrawTextContrast( draw, wpos + ImVec2( ty, offset-1-sstep ), 0xFFFFAAAA, buf );
-                        DrawLine( draw, dpos + ImVec2( 0, offset+sty-sstep ), dpos + ImVec2( w, offset+sty-sstep ), 0x22FFAAAA );
-                        ImGui::PopFont();
-                    }
 
-                    offset += ostep * partDepth;
-                    depth += partDepth;
-                }
-                else if( !singleThread )
-                {
-                    offset -= sstep;
-                }
-            }
+        // A lane may hold only markers and no zones, so the timeline can legitimately be empty.
+        int64_t begin = -1;
+        if( !tl.empty() )
+        {
+            begin = tl.is_magic() ? ((Vector<GpuEvent>*)&tl)->front().GpuStart() : tl.front()->GpuStart();
         }
-        else
-        {
-            if( tl.front()->GpuStart() >= 0 )
-            {
-                const auto begin = tl.front()->GpuStart();
-                const auto drift = GpuDrift( &gpu );
-                offset += sstep;
-                const auto partDepth = DispatchGpuZoneLevel( tl, hover, pxns, int64_t( nspx ), wpos, offset, 0, gpu.thread, yMin, yMax, begin, drift );
-                if( partDepth != 0 )
-                {
-                    if( !singleThread )
-                    {
-                        ImGui::PushFont( g_fonts.normal, FontSmall );
-                        DrawTextContrast( draw, wpos + ImVec2( ty, offset-1-sstep ), 0xFFFFAAAA, buf );
-                        DrawLine( draw, dpos + ImVec2( 0, offset+sty-sstep ), dpos + ImVec2( w, offset+sty-sstep ), 0x22FFAAAA );
-                        ImGui::PopFont();
-                    }
+        const bool hasZones = begin >= 0;
+        if( !hasZones && td.markers.empty() ) continue;
 
-                    offset += ostep * partDepth;
-                    depth += partDepth;
-                }
-                else if( !singleThread )
-                {
-                    offset -= sstep;
-                }
+        const auto drift = GpuDrift( &gpu );
+        offset += sstep;
+
+        // Marker row goes above the lane's zones, the way messages sit above a thread's zones.
+        const bool drewMarkers = DrawGpuMarkers( ctx, td.markers, offset, hasZones ? begin : 0, drift );
+        const int markerRows = drewMarkers ? 1 : 0;
+
+        const auto partDepth = hasZones
+            ? DispatchGpuZoneLevel( tl, hover, pxns, int64_t( nspx ), wpos, offset + ostep * markerRows, 0, gpu.thread, yMin, yMax, begin, drift )
+            : 0;
+
+        if( partDepth != 0 || drewMarkers )
+        {
+            if( !singleThread )
+            {
+                ImGui::PushFont( g_fonts.normal, FontSmall );
+                DrawTextContrast( draw, wpos + ImVec2( ty, offset-1-sstep ), 0xFFFFAAAA, buf );
+                DrawLine( draw, dpos + ImVec2( 0, offset+sty-sstep ), dpos + ImVec2( w, offset+sty-sstep ), 0x22FFAAAA );
+                ImGui::PopFont();
             }
+
+            offset += ostep * ( partDepth + markerRows );
+            depth += partDepth + markerRows;
+        }
+        else if( !singleThread )
+        {
+            offset -= sstep;
         }
     }
     return depth != 0;
+}
+
+static const char* GpuMarkerTypeName( uint8_t type )
+{
+    switch( (TTDeviceMarkerType)type )
+    {
+    case TTDeviceMarkerType::DATA: return "data";
+    case TTDeviceMarkerType::FLAG: return "flag";
+    case TTDeviceMarkerType::RUNTIME_EVENT: return "runtime event";
+    // Legacy DRAM-readback names, still produced by that path.
+    case TTDeviceMarkerType::TS_EVENT: return "TS_EVENT";
+    case TTDeviceMarkerType::TS_DATA: return "TS_DATA";
+    case TTDeviceMarkerType::TS_DATA_16B: return "TS_DATA_16B";
+    default: return "event";
+    }
+}
+
+// Muted, desaturated tones: a marker row sits directly above a lane's zones, so a saturated glyph reads as
+// an alarm and fights the zone colors. Distinct hue per kind, similar value so none dominates.
+static uint32_t GpuMarkerColor( uint8_t type )
+{
+    switch( (TTDeviceMarkerType)type )
+    {
+    case TTDeviceMarkerType::DATA:          return 0xFFB49678;  // slate blue
+    case TTDeviceMarkerType::FLAG:          return 0xFF82A582;  // sage green
+    case TTDeviceMarkerType::RUNTIME_EVENT: return 0xFF6EA0BE;  // muted amber
+    default:                                return 0xFFA08C8C;  // legacy DRAM markers: neutral grey
+    }
+}
+
+bool View::DrawGpuMarkers( const TimelineContext& ctx, const Vector<short_ptr<GpuMarkerData>>& vec, int offset, int64_t begin, int drift )
+{
+    if( vec.empty() ) return false;
+
+    const auto vStart = ctx.vStart;
+    const auto vEnd = ctx.vEnd;
+    const auto pxns = ctx.pxns;
+    const auto nspx = ctx.nspx;
+    const auto hover = ctx.hover;
+    const auto& wpos = ctx.wpos;
+    const auto ty = ctx.ty;
+
+    auto it = std::lower_bound( vec.begin(), vec.end(), vStart, [begin, drift] ( const auto& lhs, const auto& rhs ) { return AdjustGpuTime( lhs->gpuTime, begin, drift ) < rhs; } );
+    if( it == vec.end() ) return false;
+    const auto zitend = std::lower_bound( it, vec.end(), vEnd+1, [begin, drift] ( const auto& lhs, const auto& rhs ) { return AdjustGpuTime( lhs->gpuTime, begin, drift ) < rhs; } );
+    if( it == zitend ) return false;
+
+    if( wpos.y + offset + ty < ctx.yMin || wpos.y + offset > ctx.yMax ) return true;
+
+    auto draw = ImGui::GetWindowDrawList();
+    const auto to = 9.f * GetScale();
+    const auto th = ( ty - to ) * sqrt( 3 ) * 0.5;
+    const auto MinVisNs = int64_t( round( GetScale() * MinVisSize * nspx ) );
+
+    while( it < zitend )
+    {
+        const auto t0 = AdjustGpuTime( (*it)->gpuTime, begin, drift );
+        const auto next = std::upper_bound( it, zitend, t0 + MinVisNs, [begin, drift] ( const auto& lhs, const auto& rhs ) { return lhs < AdjustGpuTime( rhs->gpuTime, begin, drift ); } );
+        const auto num = next - it;
+        const auto px = ( t0 - vStart ) * pxns;
+
+        // A folded cluster can hold mixed kinds; color it by the first, which is the one the tooltip anchors on.
+        const uint32_t color = GpuMarkerColor( (*it)->markerType );
+        if( num == 1 )
+        {
+            draw->AddTriangle( wpos + ImVec2( px - (ty - to) * 0.5, offset + to ), wpos + ImVec2( px + (ty - to) * 0.5, offset + to ), wpos + ImVec2( px, offset + to + th ), color, 2.0f );
+        }
+        else
+        {
+            draw->AddTriangleFilled( wpos + ImVec2( px - (ty - to) * 0.5, offset + to ), wpos + ImVec2( px + (ty - to) * 0.5, offset + to ), wpos + ImVec2( px, offset + to + th ), color );
+            draw->AddTriangle( wpos + ImVec2( px - (ty - to) * 0.5, offset + to ), wpos + ImVec2( px + (ty - to) * 0.5, offset + to ), wpos + ImVec2( px, offset + to + th ), color, 2.0f );
+        }
+
+        if( hover && ImGui::IsMouseHoveringRect( wpos + ImVec2( px - (ty - to) * 0.5 - 1, offset ), wpos + ImVec2( px + (ty - to) * 0.5 + 1, offset + ty ) ) )
+        {
+            const auto tEnd = AdjustGpuTime( (*(next-1))->gpuTime, begin, drift );
+            ImGui::BeginTooltip();
+            if( num > 1 )
+            {
+                TextFocused( "Device events:", RealToString( num ) );
+                ImGui::Separator();
+                TextFocused( "Time span:", TimeToString( tEnd - t0 ) );
+                ImGui::TextDisabled( "Zoom in to separate them" );
+            }
+            else
+            {
+                auto& ev = **it;
+                auto& srcloc = m_worker.GetSourceLocation( ev.srcloc );
+                TextFocused( "Device event:", m_worker.GetString( srcloc.name ) );
+                ImGui::SameLine();
+                ImGui::TextDisabled( "(%s)", GpuMarkerTypeName( ev.markerType ) );
+                TextFocused( "Time:", TimeToStringExact( t0 ) );
+                const auto file = m_worker.GetString( srcloc.file );
+                if( file && *file )
+                {
+                    ImGui::TextDisabled( "%s:%i", file, srcloc.line );
+                }
+                if( ev.meta.Active() )
+                {
+                    ImGui::Separator();
+                    ImGui::TextUnformatted( m_worker.GetString( ev.meta ) );
+                }
+            }
+            ImGui::EndTooltip();
+
+            if( IsMouseClicked( 2 ) )
+            {
+                if( num > 1 && tEnd > t0 )
+                {
+                    ZoomToRange( t0, tEnd );
+                }
+                else
+                {
+                    CenterAtTime( t0 );
+                }
+            }
+        }
+
+        it = next;
+    }
+    return true;
 }
 
 int View::DispatchGpuZoneLevel( const Vector<short_ptr<GpuEvent>>& vec, bool hover, double pxns, int64_t nspx, const ImVec2& wpos, int _offset, int depth, uint64_t thread, float yMin, float yMax, int64_t begin, int drift )

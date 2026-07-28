@@ -67,7 +67,23 @@ enum class RiscType : uint8_t {
     X280_RELAY3
 };
 
-enum class TTDeviceMarkerType : uint8_t { ZONE_START, ZONE_END, ZONE_TOTAL, TS_DATA, TS_EVENT, TS_DATA_16B };
+// ZONE_* are durations. The rest are point markers, and they differ by where the marker's ID comes
+// from, because that decides whether the host can resolve a NAME for it:
+//   DATA / FLAG   -- compile-time tag: the id is a source-location hash, so a name exists.
+//   RUNTIME_EVENT -- runtime id: an ordinary value from the kernel. NO name exists, and it must never be
+//                    looked up in the hash->name map or it would borrow an unrelated zone's name.
+// TS_DATA / TS_EVENT / TS_DATA_16B are the legacy DRAM-readback names, kept for that path only.
+enum class TTDeviceMarkerType : uint8_t {
+    ZONE_START,
+    ZONE_END,
+    ZONE_TOTAL,
+    TS_DATA,
+    TS_EVENT,
+    TS_DATA_16B,
+    DATA,
+    FLAG,
+    RUNTIME_EVENT
+};
 
 struct MarkerDetails {
     enum class MarkerNameKeyword : uint16_t {
