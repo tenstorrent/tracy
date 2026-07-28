@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cmath>
 
 #include "TracyImGui.hpp"
 #include "TracyMouse.hpp"
@@ -139,29 +140,38 @@ void View::HandleTimelineMouse( int64_t timespan, const ImVec2& wpos, float w )
             t1 = m_vd.zvEnd;
         }
         const auto zoomSpan = t1 - t0;
-        const auto p1 = zoomSpan * p;
-        const auto p2 = zoomSpan - p1;
+        const auto pc = std::min( 1., std::max( 0., double( p ) ) );
+        const auto anchor = t0 + int64_t( zoomSpan * pc );
 
         double mod = 0.25;
         if( io.KeyCtrl ) mod = 0.05;
         else if( io.KeyShift ) mod = 0.5;
 
         mod *= m_verticalScrollMultiplier;
-#ifndef __EMSCRIPTEN__
-        mod *= fabs( wheel );
-#endif
+        // The single-step zoom fraction must stay below 1, or the two ends of the range cross
+        // over each other and the view is thrown to a point outside of it.
+        mod = std::min( mod, 0.9 );
 
+        // Apply the wheel delta as an exponent rather than a multiplier. High resolution wheels
+        // and touchpads send many small deltas, while a single frame may coalesce several large
+        // ones; this keeps the zoom proportional to the delta without ever overshooting the
+        // point under the cursor. Cap the per-frame delta so one flick cannot slam the view to
+        // maximum zoom. Backends normalize the delta so that 1.0 is one wheel notch.
+        const double steps = std::min( 4., fabs( double( wheel ) ) );
+        const double factor = pow( 1. - mod, steps );
+
+        int64_t newSpan = zoomSpan;
         if( wheel > 0 )
         {
-            t0 += int64_t( p1 * mod );
-            t1 -= int64_t( p2 * mod );
+            newSpan = std::max( int64_t( 1 ), int64_t( zoomSpan * factor ) );
         }
         else if( zoomSpan < 1000ll * 1000 * 1000 * 60 * 60 )
         {
-            t0 -= std::max( int64_t( 1 ), int64_t( p1 * mod ) );
-            t1 += std::max( int64_t( 1 ), int64_t( p2 * mod ) );
+            const double maxSpan = 1000. * 1000 * 1000 * 60 * 60 * 24 * 10;
+            newSpan = int64_t( std::min( maxSpan, std::max( double( zoomSpan + 2 ), zoomSpan / factor ) ) );
         }
-        t1 = std::max(t0, t1);
+        t0 = anchor - int64_t( newSpan * pc );
+        t1 = t0 + newSpan;
         ZoomToRange( t0, t1, !m_worker.IsConnected() || m_viewMode == ViewMode::Paused );
     }
 }
