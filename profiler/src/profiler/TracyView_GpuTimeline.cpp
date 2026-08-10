@@ -22,14 +22,6 @@ std::string GetRiscName(RiscType risc) {
         case RiscType::ERISC: return "ERISC";
         case RiscType::TENSIX_RISC_AGG: return "TENSIX_RISC_AGG";
         case RiscType::NONE: return "";
-        case RiscType::X280_RD0: return "rd0";
-        case RiscType::X280_RD1: return "rd1";
-        case RiscType::X280_RD2: return "rd2";
-        case RiscType::X280_RD3: return "rd3";
-        case RiscType::X280_RELAY0: return "relay0";
-        case RiscType::X280_RELAY1: return "relay1";
-        case RiscType::X280_RELAY2: return "relay2";
-        case RiscType::X280_RELAY3: return "relay3";
         default: return "UNKNOWN";
     }
 }

@@ -52,19 +52,7 @@ enum class RiscType : uint8_t {
     QUASAR_NEO3_TRISC0,
     QUASAR_NEO3_TRISC1,
     QUASAR_NEO3_TRISC2,
-    QUASAR_NEO3_TRISC3,
-    // X280 L2CPU drain harts (bare-metal profiler) -- their own lane labels within one X280 context.
-    // rd = reader hart, relay = relay hart. Pinned at 32 so the Quasar block above (8..31) can grow to
-    // its full 24 entries without renumbering these, and so a stale GUI can never silently decode an
-    // X280 lane as a Quasar processor. Needs RISC_BIT_COUNT >= 6 (see below).
-    X280_RD0 = 32,
-    X280_RD1,
-    X280_RD2,
-    X280_RD3,
-    X280_RELAY0,
-    X280_RELAY1,
-    X280_RELAY2,
-    X280_RELAY3
+    QUASAR_NEO3_TRISC3
 };
 
 // ZONE_* are durations. The rest are point markers, and they differ by where the marker's ID comes
@@ -148,7 +136,7 @@ struct MarkerDetails {
 const MarkerDetails UnidentifiedMarkerDetails = MarkerDetails("", "", 0);
 
 struct TTDeviceMarker {
-    // 0..63: 0-7 Tensix/eth/none, 8-31 Quasar processors, 32-39 X280 drain harts. Was 3, which could not
+    // 0..63: 0-7 Tensix/eth/none, 8-31 Quasar processors. Was 3, which could not
     // encode the Quasar entries (8..31) either -- pack_thread_id() asserts risc < (1 << RISC_BIT_COUNT).
     // 6 + 4 + 4 + 8 = 22 bits, so the uint32_t static_assert below still holds.
     static constexpr uint64_t RISC_BIT_COUNT = 6;
