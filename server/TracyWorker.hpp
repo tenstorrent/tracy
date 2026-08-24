@@ -291,6 +291,7 @@ private:
         unordered_flat_map<uint64_t, MemData*> memNameMap;
         uint64_t zonesCnt = 0;
         uint64_t gpuCnt = 0;
+        uint64_t gpuMarkerCnt = 0;
         uint64_t samplesCnt = 0;
         uint64_t ghostCnt = 0;
         int64_t baseTime = 0;
@@ -507,6 +508,7 @@ public:
     uint64_t GetZoneCount() const { return m_data.zonesCnt; }
     uint64_t GetZoneExtraCount() const { return m_data.zoneExtra.size() - 1; }
     uint64_t GetGpuZoneCount() const { return m_data.gpuCnt; }
+    uint64_t GetGpuMarkerCount() const { return m_data.gpuMarkerCnt; }
     uint64_t GetLockCount() const;
     uint64_t GetPlotCount() const;
     uint64_t GetTracyPlotCount() const;
@@ -639,6 +641,8 @@ public:
     const SourceLocationZones& GetZonesForSourceLocation( int16_t srcloc ) const;
     const unordered_flat_map<int16_t, SourceLocationZones>& GetSourceLocationZones() const { return m_data.sourceLocationZones; }
     const unordered_flat_map<int16_t, GpuSourceLocationZones>& GetGpuSourceLocationZones() const { return m_data.gpuSourceLocationZones; }
+    GpuSourceLocationZones& GetGpuZonesForSourceLocation( int16_t srcloc );
+    const GpuSourceLocationZones& GetGpuZonesForSourceLocation( int16_t srcloc ) const;
     bool AreSourceLocationZonesReady() const { return m_data.sourceLocationZonesReady; }
     bool AreGpuSourceLocationZonesReady() const { return m_data.gpuSourceLocationZonesReady; }
     bool IsCpuUsageReady() const { return m_data.ctxUsageReady; }
@@ -796,6 +800,8 @@ private:
     tracy_force_inline void ProcessGpuContextName( const QueueGpuContextName& ev );
     tracy_force_inline void ProcessGpuAnnotationName( const QueueGpuAnnotationName& ev );
     tracy_force_inline void ProcessGpuZoneAnnotation( const QueueGpuZoneAnnotation& ev );
+    tracy_force_inline void ProcessGpuMarkerMeta( const QueueGpuMarkerMeta& ev );
+    tracy_force_inline void ProcessGpuMarker( const QueueGpuMarker& ev );
     tracy_force_inline MemEvent* ProcessMemAlloc( const QueueMemAlloc& ev );
     tracy_force_inline MemEvent* ProcessMemAllocNamed( const QueueMemAlloc& ev );
     tracy_force_inline MemEvent* ProcessMemFree( const QueueMemFree& ev );
@@ -1073,6 +1079,9 @@ private:
     short_ptr<GpuCtxData> m_gpuCtxMap[65536];
     uint32_t m_pendingCallstackId = 0;
     int16_t m_pendingSourceLocationPayload = 0;
+    // Set by a GpuMarkerMeta item and consumed by the GpuMarker item that immediately follows it.
+    StringIdx m_pendingGpuMarkerMeta = {};
+    bool m_hasPendingGpuMarkerMeta = false;
     Vector<uint64_t> m_sourceLocationQueue;
     unordered_flat_map<uint64_t, int16_t> m_sourceLocationShrink;
     unordered_flat_map<uint64_t, ThreadData*> m_threadMap;

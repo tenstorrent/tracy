@@ -162,6 +162,28 @@ static ImGuiKey TranslateKeyCode( const char* code )
     return ImGuiKey_None;
 }
 
+// Convert a browser wheel delta to the unit the rest of the profiler expects: 1.0 is one
+// notch of a discrete mouse wheel, and high resolution wheels or touchpads produce
+// fractional values. The other backends already follow this convention (Wayland divides
+// the wl_fixed axis value by 15, GLFW reports notches directly), and the timeline scales
+// its zoom step by the delta, so an unnormalized value zooms by wildly the wrong amount.
+//
+// A WheelEvent may report its delta in one of three units and browsers disagree on which they
+// use: Chromium and WebKit report pixels, Gecko reports lines. The event carries no notch
+// count, so convert using the per-unit amount a single notch conventionally produces. These
+// are de-facto values rather than specified ones, and a browser scrolling a little too fast or
+// slow can be trimmed with the vertical scroll multiplier in the profiler options.
+static double WheelDeltaScale( unsigned int deltaMode )
+{
+    switch( deltaMode )
+    {
+    case DOM_DELTA_LINE:  return 1. / 3.;   // Gecko: 3 lines per notch
+    case DOM_DELTA_PAGE:  return 1.;        // 1 page per notch
+    case DOM_DELTA_PIXEL:
+    default:              return 1. / 100.; // Chromium: 100 px per notch
+    }
+}
+
 Backend::Backend( const char* title, const std::function<void()>& redraw, const std::function<void(float)>& scaleChanged, const std::function<int(void)>& isBusy, RunQueue* mainThreadTasks )
 {
     constexpr EGLint eglConfigAttrib[] = {
@@ -238,7 +260,8 @@ Backend::Backend( const char* title, const std::function<void()>& redraw, const 
         return EM_TRUE;
     } );
     emscripten_set_wheel_callback( "#canvas", nullptr, EM_TRUE, []( int, const EmscriptenWheelEvent* e, void* ) -> EM_BOOL {
-        ImGui::GetIO().AddMouseWheelEvent( e->deltaX * -0.05, e->deltaY * -0.05 );
+        const auto scale = WheelDeltaScale( e->deltaMode );
+        ImGui::GetIO().AddMouseWheelEvent( e->deltaX * -scale, e->deltaY * -scale );
         tracy::s_wasActive = true;
         return EM_TRUE;
     } );

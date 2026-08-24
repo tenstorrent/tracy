@@ -28,7 +28,7 @@ enum class RiscType : uint8_t {
                       // defined on the device
     NONE,             // No RISC label displayed (used for host-side telemetry contexts)
     // Quasar Tensix processors, ordered like internal_::get_hw_thread_idx() on the device:
-    // DM0..DM7, then Neo0..Neo3 x TRISC0..TRISC3.
+    // DM0..DM7, then Neo0..Neo3 x TRISC0..TRISC3. Occupies 8..31.
     QUASAR_DM0,
     QUASAR_DM1,
     QUASAR_DM2,
@@ -52,10 +52,26 @@ enum class RiscType : uint8_t {
     QUASAR_NEO3_TRISC0,
     QUASAR_NEO3_TRISC1,
     QUASAR_NEO3_TRISC2,
-    QUASAR_NEO3_TRISC3,
+    QUASAR_NEO3_TRISC3
 };
 
-enum class TTDeviceMarkerType : uint8_t { ZONE_START, ZONE_END, ZONE_TOTAL, TS_DATA, TS_EVENT, TS_DATA_16B };
+// ZONE_* are durations. The rest are point markers, and they differ by where the marker's ID comes
+// from, because that decides whether the host can resolve a NAME for it:
+//   DATA / FLAG   -- compile-time tag: the id is a source-location hash, so a name exists.
+//   RUNTIME_EVENT -- runtime id: an ordinary value from the kernel. NO name exists, and it must never be
+//                    looked up in the hash->name map or it would borrow an unrelated zone's name.
+// TS_DATA / TS_EVENT / TS_DATA_16B are the legacy DRAM-readback names, kept for that path only.
+enum class TTDeviceMarkerType : uint8_t {
+    ZONE_START,
+    ZONE_END,
+    ZONE_TOTAL,
+    TS_DATA,
+    TS_EVENT,
+    TS_DATA_16B,
+    DATA,
+    FLAG,
+    RUNTIME_EVENT
+};
 
 struct MarkerDetails {
     enum class MarkerNameKeyword : uint16_t {
@@ -120,7 +136,10 @@ struct MarkerDetails {
 const MarkerDetails UnidentifiedMarkerDetails = MarkerDetails("", "", 0);
 
 struct TTDeviceMarker {
-    static constexpr uint64_t RISC_BIT_COUNT = 3;
+    // 0..63: 0-7 Tensix/eth/none, 8-31 Quasar processors. Was 3, which could not
+    // encode the Quasar entries (8..31) either -- pack_thread_id() asserts risc < (1 << RISC_BIT_COUNT).
+    // 6 + 4 + 4 + 8 = 22 bits, so the uint32_t static_assert below still holds.
+    static constexpr uint64_t RISC_BIT_COUNT = 6;
     static constexpr uint64_t CORE_X_BIT_COUNT = 4;
     static constexpr uint64_t CORE_Y_BIT_COUNT = 4;
     static constexpr uint64_t CHIP_BIT_COUNT = 8;

@@ -334,10 +334,48 @@ void View::DrawStatistics()
         }
 
         const auto filterActive = m_statisticsFilter.IsActive();
+        const auto gpuCtxLimit = m_gpuCtxLimit && !m_worker.GetGpuData().empty();
         auto& slz = m_worker.GetGpuSourceLocationZones();
         srcloc.reserve( slz.size() );
         uint32_t slzcnt = 0;
-        if( m_statRange.active )
+        if( gpuCtxLimit )
+        {
+            // A zone's owning context cannot be derived from the zone list itself, so counts
+            // and totals come from a per-context index built by walking the contexts' timelines.
+            BuildGpuZoneIndex( false, 0, true, m_statRange );
+
+            const auto& gpuData = m_worker.GetGpuData();
+            m_gpuCtxVisible.resize( gpuData.size() );
+            for( size_t i=0; i<gpuData.size(); i++ ) m_gpuCtxVisible[i] = IsGpuCtxVisible( gpuData[i] );
+
+            unordered_flat_map<int16_t, std::pair<uint64_t, int64_t>> acc;
+            for( size_t ci=0; ci<m_gpuZoneIdx.ctxStats.size(); ci++ )
+            {
+                if( !m_gpuCtxVisible[ci] ) continue;
+                for( const auto& v : m_gpuZoneIdx.ctxStats[ci] )
+                {
+                    auto& e = acc[v.first];
+                    e.first += v.second.first;
+                    e.second += v.second.second;
+                }
+            }
+
+            for( auto it = slz.begin(); it != slz.end(); ++it )
+            {
+                if( it->second.total == 0 ) continue;
+                auto ait = acc.find( it->first );
+                if( ait == acc.end() || ait->second.first == 0 ) continue;
+                if( filterActive )
+                {
+                    auto& sl = m_worker.GetSourceLocation( it->first );
+                    auto name = m_worker.GetString( sl.name.active ? sl.name : sl.function );
+                    if( !m_statisticsFilter.PassFilter( name ) ) continue;
+                }
+                slzcnt++;
+                srcloc.push_back_no_space_check( SrcLocZonesSlim { it->first, 0, size_t( ait->second.first ), ait->second.second } );
+            }
+        }
+        else if( m_statRange.active )
         {
             const auto min = m_statRange.min;
             const auto max = m_statRange.max;
@@ -456,6 +494,15 @@ void View::DrawStatistics()
         TextFocused( "Visible zones:", RealToString( srcloc.size() ) );
         ImGui::SameLine();
         copySrclocsToClipboard = ClipboardButton();
+        if( !m_worker.GetGpuData().empty() )
+        {
+            ImGui::SameLine();
+            ImGui::Spacing();
+            ImGui::SameLine();
+            ImGui::Checkbox( ICON_FA_EYE " Only visible GPU contexts", &m_gpuCtxLimit );
+            ImGui::SameLine();
+            DrawHelpMarker( "Restrict the statistics to the GPU contexts that are enabled in Options \xe2\x86\x92 GPU zones. The same setting is shared with the GPU zone search." );
+        }
     }
 
     ImGui::Separator();
@@ -722,9 +769,16 @@ void View::DrawStatistics()
                     ImGui::SameLine();
                     if( m_statMode == 0 )
                     {
-                        if( ImGui::Selectable( name, m_findZone.show && !m_findZone.match.empty() && m_findZone.match[m_findZone.selMatch] == v.srcloc, ImGuiSelectableFlags_SpanAllColumns ) )
+                        if( ImGui::Selectable( name, m_findZone.show && m_findZoneMode == 0 && !m_findZone.match.empty() && m_findZone.match[m_findZone.selMatch] == v.srcloc, ImGuiSelectableFlags_SpanAllColumns ) )
                         {
                             m_findZone.ShowZone( v.srcloc, name );
+                        }
+                    }
+                    else if( m_statMode == 2 )
+                    {
+                        if( ImGui::Selectable( name, m_findZone.show && m_findZoneMode == 1 && !m_findZoneGpu.match.empty() && m_findZoneGpu.match[m_findZoneGpu.selMatch] == v.srcloc, ImGuiSelectableFlags_SpanAllColumns ) )
+                        {
+                            ShowFindZoneGpu( v.srcloc, name );
                         }
                     }
                     else

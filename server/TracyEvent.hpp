@@ -711,10 +711,24 @@ struct ThreadData
     tracy_force_inline bool DecStackCount( int16_t srcloc ) { return --stackCount[uint16_t(srcloc)] != 0; }
 };
 
+// A point-in-time event on a device lane, as opposed to a GpuEvent which has a duration. srcloc
+// holds the event identity (name, file, line, color); meta holds the per-event key/value lines.
+struct GpuMarkerData
+{
+    int64_t gpuTime;
+    int16_t srcloc;
+    uint8_t markerType;
+    StringIdx meta;
+};
+
+enum { GpuMarkerDataSize = sizeof( GpuMarkerData ) };
+
+
 struct GpuCtxThreadData
 {
     Vector<short_ptr<GpuEvent>> timeline;
     Vector<short_ptr<GpuEvent>> stack;
+    Vector<short_ptr<GpuMarkerData>> markers;
 };
 
 struct GpuCtxData

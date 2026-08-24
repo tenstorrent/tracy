@@ -418,6 +418,57 @@ public:
         TracyLfqCommit;
     }
 
+    // ---- Plot samples at a CALLER-SUPPLIED time (tt-metal addition) --------------------------------------
+    //
+    // PlotData() above stamps GetTime(), i.e. the instant the call is made. That is wrong for any value that
+    // describes a DEVICE event: the tt-metal perf-debug profiler decodes device markers milliseconds after
+    // the device produced them (the drainer's DRAM ring alone trails the last worker zone by 2.5-2.9 ms), so
+    // a plot stamped at decode time lands to the RIGHT of the zones it explains and is worse than no plot.
+    //
+    // The time is already carried on the wire -- QueuePlotDataBase{name, time} -- and the server converts it
+    // with TscTime(RefTime(...)), so nothing but this stamp needs to change. There is deliberately NO server,
+    // wire-format, GUI or tracy-capture change: PlotDataInt/Float/Double are the same queue types, decoded by
+    // the same path.
+    //
+    // `tsc` must be in the SAME domain Profiler::GetTime() returns (raw TSC on x86, not nanoseconds). To place
+    // a sample at the same displayed instant as a device zone at device timestamp `dev`, the caller wants
+    //     tsc = (dev/freq - anchor/freq) / GetTimerMul() + host_anchor
+    // which is the exact inverse of the server's device-zone mapping: the server displays a GPU zone at
+    // ConvertGpuTime(tgpu) = tgpu - anchor_ns + TscTime(host_anchor) and a plot at TscTime(tsc), and equating
+    // the two cancels the server-private baseTime entirely. Derived and checked against
+    // Worker::ProcessGpuNewContext (timeDiff = TscTime(cpuTime) - gpuTime) and Worker::TscTime.
+    //
+    // The delta encoder in Dequeue() handles a backdated stamp without complaint -- it is a plain running
+    // subtraction (`dt = t - refThread; refThread = t;`) with no ordering assertion, exactly as GpuZoneEnd's
+    // cpuTime already relies on. Two caller obligations remain, because neither is checked here:
+    //   * `name` must stay valid FOREVER (the server queries the client to dereference it), so intern or leak
+    //     it -- never pass c_str() of a temporary.
+    //   * emit samples per name in non-decreasing time order where possible; the server's plot vector is a
+    //     SortedVector, so out-of-order insertion is tolerated but costs a sort.
+    static tracy_force_inline void PlotDataAt( const char* name, int64_t val, int64_t tsc )
+    {
+        if( GetProfiler().IsEmitSuppressed() ) return;
+        TracyLfqPrepare( QueueType::PlotDataInt );
+        MemWrite( &item->plotDataInt.name, (uint64_t)name );
+        MemWrite( &item->plotDataInt.time, tsc );
+        MemWrite( &item->plotDataInt.val, val );
+        TracyLfqCommit;
+    }
+
+    static tracy_force_inline void PlotDataAt( const char* name, double val, int64_t tsc )
+    {
+        if( GetProfiler().IsEmitSuppressed() ) return;
+        TracyLfqPrepare( QueueType::PlotDataDouble );
+        MemWrite( &item->plotDataDouble.name, (uint64_t)name );
+        MemWrite( &item->plotDataDouble.time, tsc );
+        MemWrite( &item->plotDataDouble.val, val );
+        TracyLfqCommit;
+    }
+
+    // The multiplier the server will apply in TscTime(), so a caller can invert it. Exposed here because
+    // m_timerMul is otherwise private to the client and the conversion above needs it.
+    static tracy_force_inline double GetTimerMul() { return GetProfiler().m_timerMul; }
+
     static tracy_force_inline void ConfigurePlot( const char* name, PlotFormatType type, bool step, bool fill, uint32_t color )
     {
         TracyLfqPrepare( QueueType::PlotConfig );

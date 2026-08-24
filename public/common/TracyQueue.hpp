@@ -74,6 +74,8 @@ enum class QueueType : uint8_t
     GpuTime,
     GpuContextName,
     GpuAnnotationName,
+    GpuMarkerMeta,
+    GpuMarker,
     CallstackFrameSize,
     SymbolInformation,
     ExternalNameMetadata,
@@ -542,6 +544,32 @@ struct QueueGpuZoneAnnotation
     uint8_t context;
 };
 
+// A point-in-time event on a GPU/device lane, as opposed to a zone which has a duration. The
+// source location holds the event's identity (name, file, line, color) and is interned by the
+// server, so it must not carry per-event values; those go in the metadata string, which arrives
+// in the QueueGpuMarkerMeta item immediately preceding this one (omitted when there is none).
+struct QueueGpuMarker
+{
+    int64_t gpuTime;
+    uint64_t srcloc;
+    uint32_t thread;
+    uint16_t context;
+    uint8_t markerType;
+};
+
+// Only carries the string; the item exists because a QueueItem is 32 bytes and QueueGpuMarker
+// plus the fat pointer and size does not fit.
+struct QueueGpuMarkerMeta
+{
+    uint16_t context;
+};
+
+struct QueueGpuMarkerMetaFat : public QueueGpuMarkerMeta
+{
+    uint64_t ptr;
+    uint16_t size;
+};
+
 struct QueueGpuTime
 {
     int64_t gpuTime;
@@ -920,6 +948,9 @@ struct QueueItem
         QueueFiberEnter fiberEnter;
         QueueFiberLeave fiberLeave;
         QueueGpuZoneAnnotation zoneAnnotation;
+        QueueGpuMarker gpuMarker;
+        QueueGpuMarkerMeta gpuMarkerMeta;
+        QueueGpuMarkerMetaFat gpuMarkerMetaFat;
     };
 };
 #pragma pack( pop )
@@ -991,6 +1022,8 @@ static constexpr size_t QueueDataSize[] = {
     sizeof( QueueHeader ) + sizeof( QueueGpuTime ),
     sizeof( QueueHeader ) + sizeof( QueueGpuContextName ),
     sizeof( QueueHeader ) + sizeof( QueueGpuAnnotationName ),
+    sizeof( QueueHeader ) + sizeof( QueueGpuMarkerMeta ),   // GPU marker metadata (fat: carries the string)
+    sizeof( QueueHeader ) + sizeof( QueueGpuMarker ),       // GPU marker (fat: carries the srcloc payload)
     sizeof( QueueHeader ) + sizeof( QueueCallstackFrameSize ),
     sizeof( QueueHeader ) + sizeof( QueueSymbolInformation ),
     sizeof( QueueHeader ),                                  // ExternalNameMetadata - not for wire transfer

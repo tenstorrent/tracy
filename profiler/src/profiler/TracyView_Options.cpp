@@ -213,8 +213,17 @@ const char* View::GetGpuContextLabel( const GpuCtxData* gpu )
     }
     else
     {
-        auto& item = (TimelineItemGpu&)( m_tc.GetItem( gpu ) );
-        snprintf( buf, sizeof( buf ), "%s context %i", GpuContextNames[(int)gpu->type], item.GetIdx() );
+        const auto& map = m_tc.GetItemMap();
+        auto it = map.find( gpu );
+        if( it != map.end() )
+        {
+            auto& item = (TimelineItemGpu&)( *it->second );
+            snprintf( buf, sizeof( buf ), "%s context %i", GpuContextNames[(int)gpu->type], item.GetIdx() );
+        }
+        else
+        {
+            snprintf( buf, sizeof( buf ), "%s context", GpuContextNames[(int)gpu->type] );
+        }
     }
     return buf;
 }
