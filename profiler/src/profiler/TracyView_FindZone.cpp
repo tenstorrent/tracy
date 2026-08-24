@@ -265,6 +265,31 @@ void View::DrawFindZone()
     ImGui::TextWrapped( "Collection of statistical data is disabled in this build." );
     ImGui::TextWrapped( "Rebuild without the TRACY_NO_STATISTICS macro to enable zone search." );
 #else
+    if( m_worker.GetGpuZoneCount() > 0 )
+    {
+        ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 0, 0 ) );
+        ImGui::TextUnformatted( "Zones:" );
+        ImGui::SameLine();
+        ImGui::RadioButton( ICON_FA_SYRINGE " Instrumentation", &m_findZoneMode, 0 );
+        ImGui::SameLine();
+        ImGui::Spacing();
+        ImGui::SameLine();
+        ImGui::RadioButton( ICON_FA_EYE " GPU", &m_findZoneMode, 1 );
+        ImGui::PopStyleVar();
+        ImGui::Separator();
+    }
+    else
+    {
+        m_findZoneMode = 0;
+    }
+
+    if( m_findZoneMode == 1 )
+    {
+        DrawFindZoneGpu();
+        ImGui::End();
+        return;
+    }
+
     if( !m_worker.AreSourceLocationZonesReady() )
     {
         const auto ty = ImGui::GetTextLineHeight();

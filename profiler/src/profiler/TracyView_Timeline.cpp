@@ -269,6 +269,7 @@ void View::DrawTimeline()
     m_cpuDataThread.Decay( 0 );
     m_zoneHover = nullptr;
     m_zoneHover2.Decay( nullptr );
+    m_gpuHover = nullptr;
     m_findZone.range.StartFrame();
     m_statRange.StartFrame();
     m_flameRange.StartFrame();

@@ -344,6 +344,7 @@ int View::DrawGpuZoneLevel( const V& vec, bool hover, double pxns, int64_t nspx,
                         ShowZoneInfo( ev, zoneThread );
                     }
 
+                    m_gpuHover = &ev;
                     m_gpuThread = zoneThread;
                     m_gpuStart = ev.CpuStart();
                     m_gpuEnd = ev.CpuEnd();
@@ -430,6 +431,7 @@ int View::DrawGpuZoneLevel( const V& vec, bool hover, double pxns, int64_t nspx,
                     ShowZoneInfo( ev, zoneThread );
                 }
 
+                m_gpuHover = &ev;
                 m_gpuThread = zoneThread;
                 m_gpuStart = ev.CpuStart();
                 m_gpuEnd = ev.CpuEnd();

@@ -2694,6 +2694,22 @@ const Worker::SourceLocationZones& Worker::GetZonesForSourceLocation( int16_t sr
     return it != m_data.sourceLocationZones.end() ? it->second : empty;
 }
 
+Worker::GpuSourceLocationZones& Worker::GetGpuZonesForSourceLocation( int16_t srcloc )
+{
+    assert( AreGpuSourceLocationZonesReady() );
+    static GpuSourceLocationZones empty;
+    auto it = m_data.gpuSourceLocationZones.find( srcloc );
+    return it != m_data.gpuSourceLocationZones.end() ? it->second : empty;
+}
+
+const Worker::GpuSourceLocationZones& Worker::GetGpuZonesForSourceLocation( int16_t srcloc ) const
+{
+    assert( AreGpuSourceLocationZonesReady() );
+    static const GpuSourceLocationZones empty;
+    auto it = m_data.gpuSourceLocationZones.find( srcloc );
+    return it != m_data.gpuSourceLocationZones.end() ? it->second : empty;
+}
+
 const SymbolStats* Worker::GetSymbolStats( uint64_t symAddr ) const
 {
     assert( AreCallstackSamplesReady() );

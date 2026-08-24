@@ -1375,6 +1375,22 @@ void View::DrawGpuInfoWindow()
                 ShowZoneInfo( *parent, m_gpuInfoWindowThread );
             }
         }
+#ifndef TRACY_NO_STATISTICS
+        if( m_worker.AreGpuSourceLocationZonesReady() )
+        {
+            const auto sl = ev.SrcLoc();
+            const auto& slz = m_worker.GetGpuSourceLocationZones();
+            auto it = slz.find( sl );
+            if( it != slz.end() && !it->second.zones.empty() )
+            {
+                ImGui::SameLine();
+                if( ImGui::Button( ICON_FA_CHART_BAR " Statistics" ) )
+                {
+                    ShowFindZoneGpu( sl, m_worker.GetString( srcloc.name.active ? srcloc.name : srcloc.function ) );
+                }
+            }
+        }
+#endif
         if( ev.callstack.Val() != 0 )
         {
             ImGui::SameLine();

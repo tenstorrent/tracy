@@ -98,6 +98,14 @@ class View
         NonReentrantChildren
     };
 
+    // One GPU zone plus an index into GpuZoneIndex::owners, which names its context and
+    // submitting thread.
+    struct GpuZoneRef
+    {
+        short_ptr<const GpuEvent> zone;
+        uint32_t owner;
+    };
+
     struct StatisticsCache
     {
         RangeSlim range;
@@ -298,6 +306,7 @@ private:
     void DrawMessages();
     void DrawMessageLine( const MessageData& msg, bool hasCallstack, int& idx );
     void DrawFindZone();
+    void DrawFindZoneGpu();
     void AccumulationModeComboBox();
     void DrawStatistics();
     void DrawSamplesStatistics(Vector<SymList>& data, int64_t timeRange, AccumulationMode accumulationMode);
@@ -335,6 +344,7 @@ private:
     unordered_flat_map<uint64_t, MemCallstackFrameTree> GetCallstackFrameTreeTopDown( const MemData& mem ) const;
     void DrawFrameTreeLevel( const unordered_flat_map<uint64_t, MemCallstackFrameTree>& tree, int& idx );
     void DrawZoneList( int id, const Vector<short_ptr<ZoneEvent>>& zones );
+    void DrawGpuZoneList( int id, const Vector<GpuZoneRef>& zones );
 
     unordered_flat_map<uint64_t, CallstackFrameTree> GetCallstackFrameTreeBottomUp( const unordered_flat_map<uint32_t, uint64_t>& stacks, bool group ) const;
     unordered_flat_map<uint64_t, CallstackFrameTree> GetCallstackFrameTreeTopDown( const unordered_flat_map<uint32_t, uint64_t>& stacks, bool group ) const;
@@ -394,6 +404,10 @@ private:
     uint64_t GetZoneThread( const ZoneEvent& zone ) const;
     uint64_t GetZoneThread( const GpuEvent& zone ) const;
     const GpuCtxData* GetZoneCtx( const GpuEvent& zone ) const;
+    bool IsGpuCtxVisible( const GpuCtxData* ctx );
+    uint64_t GpuCtxVisibilityHash();
+    void ShowFindZoneGpu( int16_t srcloc, const char* name );
+    void BuildGpuZoneIndex( bool wantZones, int16_t srcloc, bool needStats, const Range& statRange );
     bool FindMatchingZone( int prev0, int prev1, int flags );
     const ZoneEvent* FindZoneAtTime( uint64_t thread, int64_t time ) const;
     uint64_t GetFrameNumber( const FrameData& fd, int i ) const;
@@ -403,6 +417,7 @@ private:
 
 #ifndef TRACY_NO_STATISTICS
     void FindZones();
+    void FindZonesGpu();
     void FindZonesCompare();
 #endif
 
@@ -525,6 +540,7 @@ private:
     uint32_t m_lockInfoWindow = InvalidId;
     const ZoneEvent* m_zoneHover = nullptr;
     DecayValue<const ZoneEvent*> m_zoneHover2 = nullptr;
+    const GpuEvent* m_gpuHover = nullptr;
     int m_frameHover = -1;
     bool m_messagesScrollBottom;
 
@@ -842,6 +858,171 @@ private:
     } m_findZone;
 
     tracy_force_inline uint64_t GetSelectionTarget( const Worker::ZoneThreadData& ev, FindZone::GroupBy groupBy ) const;
+
+    struct FindZoneGpu {
+        static constexpr uint64_t Unselected = std::numeric_limits<uint64_t>::max() - 1;
+        enum class GroupBy : int { Context, Thread, NoGrouping };
+        enum class SortBy : int { Order, Count, Time, Mtpc };
+
+        struct Group
+        {
+            uint16_t id;
+            Vector<GpuZoneRef> zones;
+            int64_t time = 0;
+        };
+
+        bool hasResults = false;
+        bool ignoreCase = false;
+        std::vector<int16_t> match;
+        unordered_flat_map<uint64_t, Group> groups;
+        size_t processed;
+        uint16_t groupId;
+        int selMatch = 0;
+        uint64_t selGroup = Unselected;
+        char pattern[1024] = {};
+        bool logVal = false;
+        bool logTime = true;
+        bool cumulateTime = false;
+        bool selfTime = false;
+        uint64_t ctxHash = 0;
+        uint32_t idxGeneration = 0;
+        GroupBy groupBy = GroupBy::Context;
+        SortBy sortBy = SortBy::Count;
+        Region highlight;
+        int64_t hlOrig_t0, hlOrig_t1;
+        int64_t numBins = -1;
+        std::unique_ptr<int64_t[]> bins, binTime, selBin;
+        Vector<int64_t> sorted, selSort;
+        size_t sortedNum = 0, selSortNum, selSortActive;
+        float average, selAverage;
+        float median, selMedian;
+        float p75, p90, p99, p99_9;
+        int64_t total, selTotal;
+        double sumSq;
+        int64_t selTime;
+        bool drawAvgMed = true;
+        bool drawSelAvgMed = true;
+        bool scheduleResetMatch = false;
+        int minBinVal = 1;
+        int64_t tmin, tmax;
+        // The time range is shared with FindZone; only the change detector is per-mode.
+        RangeSlim rangeSlim;
+
+        struct
+        {
+            int numBins = -1;
+            ptrdiff_t distBegin;
+            ptrdiff_t distEnd;
+        } binCache;
+
+        void Reset()
+        {
+            ResetMatch();
+            match.clear();
+            selMatch = 0;
+            selGroup = Unselected;
+            highlight.active = false;
+            hasResults = false;
+        }
+
+        void ResetMatch()
+        {
+            ResetGroups();
+            sorted.clear();
+            sortedNum = 0;
+            average = 0;
+            median = 0;
+            p75 = 0;
+            p90 = 0;
+            p99 = 0;
+            p99_9 = 0;
+            total = 0;
+            sumSq = 0;
+            tmin = std::numeric_limits<int64_t>::max();
+            tmax = std::numeric_limits<int64_t>::min();
+        }
+
+        void ResetGroups()
+        {
+            ResetSelection();
+            groups.clear();
+            processed = 0;
+            groupId = 0;
+            selGroup = Unselected;
+        }
+
+        void ResetSelection()
+        {
+            selSort.clear();
+            selSortNum = 0;
+            selSortActive = 0;
+            selAverage = 0;
+            selMedian = 0;
+            selTotal = 0;
+            selTime = 0;
+            binCache.numBins = -1;
+        }
+
+        void ShowZone( int16_t srcloc, const char* name )
+        {
+            Reset();
+            match.emplace_back( srcloc );
+            strcpy( pattern, name );
+        }
+    } m_findZoneGpu;
+
+    uint64_t GetGpuSelectionTarget( const GpuZoneRef& ev, FindZoneGpu::GroupBy groupBy ) const;
+
+    // 0 - instrumentation (CPU) zones, 1 - GPU/device zones
+    int m_findZoneMode = 0;
+    // Restrict GPU statistics and GPU zone search to the contexts that are currently
+    // visible in Options -> GPU zones.
+    bool m_gpuCtxLimit = false;
+    uint64_t m_gpuStatCacheCtxHash = 0;
+
+    // GpuZoneThreadData carries no context id, and its thread field cannot stand in for one:
+    // the worker fills it with a compressed thread id during live capture but with the raw
+    // threadData key when loading a file, and a single thread id can legitimately belong to
+    // more than one context (TT device packs chip/core/risc into it, and the packing collides).
+    // So ownership is established by walking the contexts' own timelines instead.
+    struct GpuZoneIndex
+    {
+        // Owner of a run of zones: an index into Worker::GetGpuData() plus the raw submitting
+        // thread id, i.e. one entry per (context, thread) timeline.
+        struct Owner
+        {
+            uint32_t ctx;
+            uint64_t tid;
+        };
+
+        std::vector<Owner> owners;
+        // Per context, per source location: zone count and summed duration.
+        std::vector<unordered_flat_map<int16_t, std::pair<uint64_t, int64_t>>> ctxStats;
+        bool ctxStatsValid = false;
+        RangeSlim ctxStatsRange;
+
+        // Every zone of one source location, sorted by GpuStart, tagged with its owner.
+        // Allocated source locations have negative ids, so no srcloc value can serve as a
+        // "nothing cached" sentinel; validity is tracked separately.
+        int16_t zonesSrcloc = 0;
+        bool zonesValid = false;
+        Vector<GpuZoneRef> zones;
+
+        uint64_t gpuCnt = 0;
+        // Bumped by every walk. Consumers holding GpuZoneRef copies must drop them when it
+        // changes, since owner indices are only meaningful within one build.
+        uint32_t generation = 0;
+
+        void Invalidate()
+        {
+            ctxStatsValid = false;
+            zonesValid = false;
+            zones.clear();
+        }
+    } m_gpuZoneIdx;
+
+    // Scratch: per-context in-scope flags, rebuilt each frame from the visibility checkboxes.
+    std::vector<bool> m_gpuCtxVisible;
 
     struct CompVal
     {

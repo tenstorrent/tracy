@@ -1,7 +1,11 @@
 #include <inttypes.h>
+#include <functional>
+
+#include "tracy_pdqsort.h"
 
 #include "TracyColor.hpp"
 #include "TracyPrint.hpp"
+#include "TracyTimelineItem.hpp"
 #include "TracyUtility.hpp"
 #include "TracyView.hpp"
 #include "../common/TracyStackFrames.hpp"
@@ -552,6 +556,139 @@ const GpuCtxData* View::GetZoneCtx( const GpuEvent& zone ) const
         }
     }
     return nullptr;
+}
+
+bool View::IsGpuCtxVisible( const GpuCtxData* ctx )
+{
+    // The timeline item is created during the timeline draw pass; treat a context that has
+    // not been laid out yet as visible so that filtering never hides everything.
+    const auto& map = m_tc.GetItemMap();
+    auto it = map.find( ctx );
+    if( it == map.end() ) return true;
+    return it->second->IsVisible();
+}
+
+uint64_t View::GpuCtxVisibilityHash()
+{
+    if( !m_gpuCtxLimit ) return 0;
+    uint64_t hash = 0x100000001b3;
+    for( const auto& ctx : m_worker.GetGpuData() )
+    {
+        hash = ( hash ^ ( IsGpuCtxVisible( ctx ) ? 1 : 2 ) ) * 0x100000001b3;
+    }
+    return hash;
+}
+
+// Establishes which GPU context each zone belongs to by walking the contexts' own timelines,
+// which is the only authoritative source (see the GpuZoneIndex comment in TracyView.hpp).
+//
+// One pass fills two products: per-context/per-source-location aggregates for the statistics
+// view, and the full tagged zone list for one source location for the zone search. Both are
+// cached; the pass reruns only when the trace grows, when the statistics range moves, or when
+// a different source location is selected.
+void View::BuildGpuZoneIndex( bool wantZones, int16_t srcloc, bool needStats, const Range& statRange )
+{
+    auto& idx = m_gpuZoneIdx;
+    const auto gpuCnt = m_worker.GetGpuZoneCount();
+    if( idx.gpuCnt != gpuCnt )
+    {
+        idx.gpuCnt = gpuCnt;
+        idx.Invalidate();
+    }
+
+    const bool buildStats = needStats && ( !idx.ctxStatsValid || idx.ctxStatsRange != statRange );
+    bool buildZones = wantZones && ( !idx.zonesValid || idx.zonesSrcloc != srcloc );
+    if( !buildStats && !buildZones ) return;
+
+    // owners is renumbered by every walk, so a cached zone list would be left pointing at the
+    // wrong entries. Rebuild it alongside whenever a walk happens.
+    if( buildStats && !buildZones && idx.zonesValid )
+    {
+        srcloc = idx.zonesSrcloc;
+        buildZones = true;
+    }
+
+    const auto& gpuData = m_worker.GetGpuData();
+
+    if( buildStats )
+    {
+        idx.ctxStats.clear();
+        idx.ctxStats.resize( gpuData.size() );
+        idx.ctxStatsRange = statRange;
+    }
+    if( buildZones )
+    {
+        idx.zones.clear();
+        idx.zonesSrcloc = srcloc;
+        idx.zonesValid = true;
+        auto& slz = m_worker.GetGpuSourceLocationZones();
+        auto it = slz.find( srcloc );
+        if( it != slz.end() ) idx.zones.reserve( it->second.zones.size() );
+    }
+    idx.owners.clear();
+
+    const auto rmin = statRange.min;
+    const auto rmax = statRange.max;
+    const bool limitRange = statRange.active;
+
+    std::function<void(const Vector<short_ptr<GpuEvent>>&, uint32_t)> Walk;
+    Walk = [this, &Walk, &idx, buildStats, buildZones, srcloc, limitRange, rmin, rmax]( const Vector<short_ptr<GpuEvent>>& _vec, uint32_t owner )
+    {
+        const auto ctx = idx.owners[owner].ctx;
+        auto Visit = [&]( const GpuEvent& zone )
+        {
+            const auto start = zone.GpuStart();
+            const auto end = zone.GpuEnd();
+            if( end >= 0 )
+            {
+                const auto d = end - start;
+                if( d > 0 )
+                {
+                    if( buildStats && ( !limitRange || ( start >= rmin && end <= rmax ) ) )
+                    {
+                        auto& e = idx.ctxStats[ctx][zone.SrcLoc()];
+                        e.first++;
+                        e.second += d;
+                    }
+                    // Deliberately unfiltered: the zone search applies its own range per frame.
+                    if( buildZones && zone.SrcLoc() == srcloc )
+                    {
+                        idx.zones.push_back( GpuZoneRef { &zone, owner } );
+                    }
+                }
+            }
+            if( zone.Child() >= 0 ) Walk( m_worker.GetGpuChildren( zone.Child() ), owner );
+        };
+
+        if( _vec.is_magic() )
+        {
+            for( auto& zone : *(Vector<GpuEvent>*)( &_vec ) ) Visit( zone );
+        }
+        else
+        {
+            for( auto& zone : _vec ) Visit( *zone );
+        }
+    };
+
+    for( uint32_t ci=0; ci<gpuData.size(); ci++ )
+    {
+        for( const auto& td : gpuData[ci]->threadData )
+        {
+            if( td.second.timeline.empty() ) continue;
+            const auto owner = uint32_t( idx.owners.size() );
+            idx.owners.push_back( GpuZoneIndex::Owner { ci, td.first } );
+            Walk( td.second.timeline, owner );
+        }
+    }
+
+    idx.generation++;
+    if( buildStats ) idx.ctxStatsValid = true;
+    if( buildZones )
+    {
+        pdqsort_branchless( idx.zones.begin(), idx.zones.end(), []( const auto& l, const auto& r ) {
+            return l.zone->GpuStart() < r.zone->GpuStart();
+        } );
+    }
 }
 
 int64_t View::GetZoneChildTime( const ZoneEvent& zone )
