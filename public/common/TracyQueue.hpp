@@ -88,6 +88,7 @@ enum class QueueType : uint8_t
     ThreadContext,
     GpuCalibration,
     GpuTimeSync,
+    GpuZone,
     Crash,
     CrashReport,
     ZoneValidation,
@@ -564,6 +565,15 @@ struct QueueGpuMarkerMeta
     uint16_t context;
 };
 
+struct QueueGpuZone
+{
+    int64_t gpuStart;
+    int64_t gpuEnd;
+    uint64_t srcloc;
+    uint32_t thread;
+    uint16_t context;
+};
+
 struct QueueGpuMarkerMetaFat : public QueueGpuMarkerMeta
 {
     uint64_t ptr;
@@ -951,6 +961,7 @@ struct QueueItem
         QueueGpuMarker gpuMarker;
         QueueGpuMarkerMeta gpuMarkerMeta;
         QueueGpuMarkerMetaFat gpuMarkerMetaFat;
+        QueueGpuZone gpuZone;
     };
 };
 #pragma pack( pop )
@@ -1037,6 +1048,7 @@ static constexpr size_t QueueDataSize[] = {
     sizeof( QueueHeader ) + sizeof( QueueThreadContext ),
     sizeof( QueueHeader ) + sizeof( QueueGpuCalibration ),
     sizeof( QueueHeader ) + sizeof( QueueGpuTimeSync ),
+    sizeof( QueueHeader ) + sizeof( QueueGpuZone ),
     sizeof( QueueHeader ),                                  // crash
     sizeof( QueueHeader ) + sizeof( QueueCrashReport ),
     sizeof( QueueHeader ) + sizeof( QueueZoneValidation ),
