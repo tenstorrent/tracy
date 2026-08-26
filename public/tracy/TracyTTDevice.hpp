@@ -14,6 +14,7 @@
 #define TracyTTPushEndZone(c, e)
 #define TracyTTPushMarker(c, e)
 #define TracyTTPushZone(c, s, t, b, e)
+#define TracyTTPushZoneSerial(c, s, t, b, e)
 
 #define TracyGetTimerMul() 0
 #define TracyGetBaseTime() 0
@@ -404,6 +405,27 @@ namespace tracy {
             TracyLfqCommit;
         }
 
+        // SERIAL-queue twin of PushZone, same wire item. Use this when the same producer also sends
+        // SERIAL items that reference this context (GpuNewContext, markers): the client drains the
+        // lock-free queues BEFORE the serial one each pass, so a lock-free zone can overtake a serial
+        // GpuNewContext enqueued earlier -- and the server hard-asserts on an unknown context. One
+        // serial item per zone is still strictly cheaper than the legacy begin/end pair (two serial
+        // items plus an alloc'd srcloc). Same ordering contract: per (context, thread), completion order.
+        tracy_force_inline void PushZoneSerial(
+            const SourceLocationData* srcloc, uint32_t thread, uint64_t start, uint64_t end) {
+            if (tracy::GetProfiler().IsEmitSuppressed()) {
+                return;
+            }
+            auto item = Profiler::QueueSerial();
+            MemWrite(&item->hdr.type, QueueType::GpuZone);
+            MemWrite(&item->gpuZone.gpuStart, (int64_t)round((double)start / m_frequency));
+            MemWrite(&item->gpuZone.gpuEnd, (int64_t)round((double)end / m_frequency));
+            MemWrite(&item->gpuZone.srcloc, (uint64_t)srcloc);
+            MemWrite(&item->gpuZone.thread, thread);
+            MemWrite(&item->gpuZone.context, GetId());
+            Profiler::QueueSerialFinish();
+        }
+
         void PushEndMarker(const TTDeviceMarker& marker) {
             if (tracy::GetProfiler().IsEmitSuppressed()) {
                 return;
@@ -471,6 +493,7 @@ using TracyTTCtx = tracy::TTCtx*;
 #define TracyTTPushEndMarker(ctx, marker) ctx->PushEndMarker(marker)
 #define TracyTTPushMarker(ctx, marker) ctx->PushMarker(marker)
 #define TracyTTPushZone(ctx, srcloc, thread, start, end) ctx->PushZone(srcloc, thread, start, end)
+#define TracyTTPushZoneSerial(ctx, srcloc, thread, start, end) ctx->PushZoneSerial(srcloc, thread, start, end)
 
 #define TracyGetTimerMul() tracy::get_tracy_timer_mul()
 #define TracyGetBaseTime() tracy::get_tracy_base_time()
