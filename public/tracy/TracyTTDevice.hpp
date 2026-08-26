@@ -6,11 +6,14 @@
 #define TracyTTContext() nullptr
 #define TracyTTDestroy(c)
 #define TracyTTContextName(c, x, y)
+#define TracyTTContextNameLockfree(c, x, y)
 #define TracyTTContextPopulate(c, x, y, z)
 #define TracyTTContextPopulateCalibrated(c, x, y, z)
+#define TracyTTContextPopulateCalibratedLockfree(c, x, y, z)
 #define TracyTTPushStartZone(c, e)
 #define TracyTTPushEndZone(c, e)
 #define TracyTTPushMarker(c, e)
+#define TracyTTPushZone(c, s, t, b, e)
 
 #define TracyGetTimerMul() 0
 #define TracyGetBaseTime() 0
@@ -146,6 +149,36 @@ namespace tracy {
             MemWrite(&item->gpuNewContext.flags, (uint8_t)GpuContextCalibration);
             Profiler::QueueSerialFinish();
             mm_tcpu = tcpu;
+        }
+
+        // Same as PopulateTTContextCalibrated but on the per-thread lock-free queue rather than the serial one.
+        void PopulateTTContextCalibratedLockfree(int64_t tcpu, double tgpu, double frequency) {
+            m_frequency = frequency;
+            m_tgpu = tgpu;
+            if (tcpu == 0) {
+                tcpu = m_tcpu;
+            }
+            TracyLfqPrepare(QueueType::GpuNewContext);
+            MemWrite(&item->gpuNewContext.cpuTime, tcpu);
+            MemWrite(&item->gpuNewContext.gpuTime, (int64_t)round((double)m_tgpu / m_frequency));
+            memset(&item->gpuNewContext.thread, 0, sizeof(item->gpuNewContext.thread));
+            MemWrite(&item->gpuNewContext.period, (float)1.0f);
+            MemWrite(&item->gpuNewContext.type, GpuContextType::tt_device);
+            MemWrite(&item->gpuNewContext.context, GetId());
+            MemWrite(&item->gpuNewContext.flags, (uint8_t)GpuContextCalibration);
+            TracyLfqCommit;
+            mm_tcpu = tcpu;
+        }
+
+        void NameLockfree( const char* name, uint16_t len )
+        {
+            auto ptr = (char*)tracy_malloc( len );
+            memcpy( ptr, name, len );
+            TracyLfqPrepare( QueueType::GpuContextName );
+            MemWrite( &item->gpuContextNameFat.context, GetId() );
+            MemWrite( &item->gpuContextNameFat.ptr, (uint64_t)ptr );
+            MemWrite( &item->gpuContextNameFat.size, len );
+            TracyLfqCommit;
         }
 
         void CalibrateTTContext(int64_t tcpu, double tgpu, double frequency)
@@ -356,6 +389,21 @@ namespace tracy {
             Profiler::QueueSerialFinish();
         }
 
+        // Per (context, thread), calls must arrive in zone completion order (i.e., sorted by `end`); the server rebuilds nesting from that ordering.
+        tracy_force_inline void PushZone(
+            const SourceLocationData* srcloc, uint32_t thread, uint64_t start, uint64_t end) {
+            if (tracy::GetProfiler().IsEmitSuppressed()) {
+                return;
+            }
+            TracyLfqPrepare(QueueType::GpuZone);
+            MemWrite(&item->gpuZone.gpuStart, (int64_t)round((double)start / m_frequency));
+            MemWrite(&item->gpuZone.gpuEnd, (int64_t)round((double)end / m_frequency));
+            MemWrite(&item->gpuZone.srcloc, (uint64_t)srcloc);
+            MemWrite(&item->gpuZone.thread, thread);
+            MemWrite(&item->gpuZone.context, GetId());
+            TracyLfqCommit;
+        }
+
         void PushEndMarker(const TTDeviceMarker& marker) {
             if (tracy::GetProfiler().IsEmitSuppressed()) {
                 return;
@@ -412,13 +460,17 @@ using TracyTTCtx = tracy::TTCtx*;
 #define TracyTTContext() tracy::CreateTTContext()
 #define TracyTTDestroy(ctx) tracy::DestroyTTContext(ctx)
 #define TracyTTContextName(ctx, name, size) ctx->Name(name, size)
+#define TracyTTContextNameLockfree(ctx, name, size) ctx->NameLockfree(name, size)
 #define TracyTTContextPopulate(ctx, cpuTime, timeshift, frequency) ctx->PopulateTTContext(cpuTime, timeshift, frequency)
 #define TracyTTContextPopulateCalibrated(ctx, cpuTime, timeshift, frequency) \
     ctx->PopulateTTContextCalibrated(cpuTime, timeshift, frequency)
+#define TracyTTContextPopulateCalibratedLockfree(ctx, cpuTime, timeshift, frequency) \
+    ctx->PopulateTTContextCalibratedLockfree(cpuTime, timeshift, frequency)
 #define TracyTTContextCalibrate(ctx, cpuTime, timeshift, frequency) ctx->CalibrateTTContext(cpuTime, timeshift, frequency)
 #define TracyTTPushStartMarker(ctx, marker) ctx->PushStartMarker(marker)
 #define TracyTTPushEndMarker(ctx, marker) ctx->PushEndMarker(marker)
 #define TracyTTPushMarker(ctx, marker) ctx->PushMarker(marker)
+#define TracyTTPushZone(ctx, srcloc, thread, start, end) ctx->PushZone(srcloc, thread, start, end)
 
 #define TracyGetTimerMul() tracy::get_tracy_timer_mul()
 #define TracyGetBaseTime() tracy::get_tracy_base_time()

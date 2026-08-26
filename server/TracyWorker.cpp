@@ -4727,6 +4727,9 @@ bool Worker::Process( const QueueItem& ev )
     case QueueType::GpuMarker:
         ProcessGpuMarker( ev.gpuMarker );
         break;
+    case QueueType::GpuZone:
+        ProcessGpuZone( ev.gpuZone );
+        break;
     case QueueType::MemAlloc:
         ProcessMemAlloc( ev.memAlloc );
         break;
@@ -6282,6 +6285,89 @@ void Worker::ProcessGpuMarker( const QueueGpuMarker& ev )
 
     m_data.gpuMarkerCnt++;
     if( m_data.lastTime < marker->gpuTime ) m_data.lastTime = marker->gpuTime;
+}
+
+void Worker::ProcessGpuZone( const QueueGpuZone& ev )
+{
+    auto ctx = m_gpuCtxMap[ev.context];
+    assert( ctx );
+
+    CheckSourceLocation( ev.srcloc );
+
+    auto zone = m_slab.Alloc<GpuEvent>();
+    zone->SetSrcLoc( ShrinkSourceLocation( ev.srcloc ) );
+    // Timestamps arrive absolute (no RefTime delta, no 32-bit-timer overflow tracking: the wire
+    // carries full 64-bit device time). Cpu times are set to the converted device times: there is
+    // no host-side begin/end call to take a cpu timestamp from, and an anchor-mapped device time
+    // is the honest equivalent.
+    const auto start = ConvertGpuTime( ctx.get(), ev.gpuStart );
+    const auto end = ConvertGpuTime( ctx.get(), ev.gpuEnd );
+    zone->SetCpuStart( start );
+    zone->SetCpuEnd( end );
+    zone->SetGpuStart( start );
+    zone->SetGpuEnd( end );
+    zone->callstack.SetVal( 0 );
+    zone->SetChild( -1 );
+    zone->query_id = 0;
+
+    uint64_t ztid;
+    if( ctx->thread == 0 )
+    {
+        zone->SetThread( CompressThread( ev.thread ) );
+        ztid = ev.thread;
+    }
+    else
+    {
+        zone->SetThread( 0 );
+        ztid = 0;
+    }
+
+    auto td = ctx->threadData.find( ztid );
+    if( td == ctx->threadData.end() )
+    {
+        td = ctx->threadData.emplace( ztid, GpuCtxThreadData {} ).first;
+    }
+    auto& tl = td->second.timeline;
+
+    // Complete zones arrive in COMPLETION order, so a zone arrives after everything it contains:
+    // its children are exactly the top-level-so-far zones it encloses, and (top-level zones being
+    // disjoint and start-sorted) those form the timeline's tail. Re-parent that tail under the new
+    // zone and append it -- the timeline stays start-sorted because the new zone starts no later
+    // than everything it absorbed.
+    size_t cut = tl.size();
+    while( cut > 0 && tl[cut-1]->GpuStart() >= start ) cut--;
+    if( cut < tl.size() )
+    {
+        zone->SetChild( int32_t( m_data.gpuChildren.size() ) );
+        m_data.gpuChildren.push_back( Vector<short_ptr<GpuEvent>>() );
+        auto& children = m_data.gpuChildren[zone->Child()];
+        for( size_t i = cut; i < tl.size(); i++ ) children.push_back( tl[i] );
+        while( tl.size() > cut ) tl.pop_back();
+    }
+    tl.push_back( zone );
+
+    m_data.gpuCnt++;
+    ctx->count++;
+
+#ifndef TRACY_NO_STATISTICS
+    const auto timeSpan = end - start;
+    if( timeSpan > 0 )
+    {
+        GpuZoneThreadData ztd;
+        ztd.SetZone( zone );
+        ztd.SetThread( zone->Thread() );
+        auto slz = GetGpuSourceLocationZones( zone->SrcLoc() );
+        slz->zones.push_back( ztd );
+        if( slz->min > timeSpan ) slz->min = timeSpan;
+        if( slz->max < timeSpan ) slz->max = timeSpan;
+        slz->total += timeSpan;
+        slz->sumSq += double( timeSpan ) * timeSpan;
+    }
+#else
+    CountZoneStatistics( zone );
+#endif
+
+    if( m_data.lastTime < end ) m_data.lastTime = end;
 }
 
 MemEvent* Worker::ProcessMemAllocImpl( MemData& memdata, const QueueMemAlloc& ev )
