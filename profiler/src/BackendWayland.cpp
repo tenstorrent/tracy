@@ -19,6 +19,10 @@
 #include <wayland-cursor.h>
 #include <wayland-egl.h>
 
+#ifndef TRACY_NO_FILESELECTOR
+#  include <nfd.h>
+#endif
+
 #include "wayland-xdg-activation-client-protocol.h"
 #include "wayland-xdg-decoration-client-protocol.h"
 #include "wayland-xdg-shell-client-protocol.h"
@@ -1134,6 +1138,10 @@ void Backend::Show()
 
 void Backend::Run()
 {
+#ifndef TRACY_NO_FILESELECTOR
+    NFD_SetWaylandDisplay( s_dpy );
+#endif
+
     timespec zero = {};
     while( s_running && wl_display_dispatch_timeout( s_dpy, &zero ) != -1 )
     {
@@ -1371,4 +1379,22 @@ void Backend::SetTitle( const char* title )
 float Backend::GetDpiScale()
 {
     return s_maxScale / 120.f;
+}
+
+size_t Backend::HandleType()
+{
+#ifdef TRACY_NO_FILESELECTOR
+    return 0;
+#else
+    return NFD_WINDOW_HANDLE_TYPE_WAYLAND;
+#endif
+}
+
+void* Backend::Handle()
+{
+#ifdef TRACY_NO_FILESELECTOR
+    return nullptr;
+#else
+    return s_surf;
+#endif
 }

@@ -1,4 +1,4 @@
-project('tracy', ['cpp'], version: '0.13.1', meson_version: '>=1.3.0', default_options : ['cpp_std=c++11'])
+project('tracy', ['cpp'], version: run_command('sh', files('extra/tracy-version.sh'), 'public/common/TracyVersion.hpp', check: true).stdout().strip(), meson_version: '>=1.3.0', default_options : ['cpp_std=c++11'])
 
 # internal compiler flags
 tracy_compile_args = []
@@ -19,6 +19,10 @@ endif
 
 if get_option('callstack') > 0
   tracy_common_args += ['-DTRACY_CALLSTACK='+get_option('callstack').to_string()]
+endif
+
+if get_option('platform_header') != ''
+  tracy_common_args += ['-DTRACY_PLATFORM_HEADER="'+get_option('platform_header')+'"']
 endif
 
 if get_option('no_callstack')
@@ -57,6 +61,10 @@ if get_option('no_sampling')
   tracy_common_args += ['-DTRACY_NO_SAMPLING']
 endif
 
+if get_option('no_wait_stacks')
+  tracy_common_args += ['-DTRACY_NO_WAIT_STACKS']
+endif
+
 if get_option('no_verify')
   tracy_common_args += ['-DTRACY_NO_VERIFY']
 endif
@@ -75,10 +83,6 @@ endif
 
 if get_option('patchable_nopsleds')
   tracy_common_args += ['-DTRACY_PATCHABLE_NOPSLEDS']
-endif
-
-if get_option('delayed_init')
-  tracy_common_args += ['-DTRACY_DELAYED_INIT']
 endif
 
 if get_option('manual_lifetime')
@@ -131,6 +135,10 @@ if get_option('ignore_memory_faults')
   tracy_common_args += ['-DTRACY_IGNORE_MEMORY_FAULTS']
 endif
 
+if get_option('opengl_auto_calibration')
+  tracy_common_args += ['-DTRACY_OPENGL_AUTO_CALIBRATION']
+endif
+
 tracy_shared_libs = get_option('default_library') == 'shared'
 
 if tracy_shared_libs
@@ -150,7 +158,8 @@ includes = [
     'public/tracy/TracyLua.hpp',
     'public/tracy/TracyOpenCL.hpp',
     'public/tracy/TracyOpenGL.hpp',
-    'public/tracy/TracyVulkan.hpp'
+    'public/tracy/TracyVulkan.hpp',
+    'public/tracy/TracyWebGPU.hpp'
 ]
 
 client_includes = [
@@ -182,15 +191,19 @@ common_includes = [
     'public/common/TracyAlign.hpp',
     'public/common/TracyAlloc.hpp',
     'public/common/TracyApi.h',
+    'public/common/TracyAssert.hpp',
     'public/common/TracyColor.hpp',
     'public/common/TracyForceInline.hpp',
+    'public/common/TracyFormat.h',
     'public/common/TracyMutex.hpp',
     'public/common/TracyProtocol.hpp',
     'public/common/TracyQueue.hpp',
     'public/common/TracySocket.hpp',
     'public/common/TracyStackFrames.hpp',
+    'public/common/TracyString.hpp',
     'public/common/TracySystem.hpp',
     'public/common/TracyTaggedUserlandAddress.hpp',
+    'public/common/TracyVersion.hpp',
     'public/common/TracyWinFamily.hpp',
     'public/common/TracyYield.hpp'
 ]

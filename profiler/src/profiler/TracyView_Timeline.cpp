@@ -24,16 +24,16 @@ void View::HandleTimelineMouse( int64_t timespan, const ImVec2& wpos, float w )
 
     const auto nspx = double( timespan ) / w;
 
-    if( IsMouseClicked( 0 ) )
+    if( IsMouseClicked( ImGuiMouseButton_Left ) )
     {
         m_highlight.active = true;
         m_highlight.start = m_highlight.end = m_vd.zvStart + ( io.MousePos.x - wpos.x ) * nspx;
     }
-    else if( IsMouseDragging( 0 ) )
+    else if( IsMouseDragging( ImGuiMouseButton_Left ) )
     {
         m_highlight.end = m_vd.zvStart + ( io.MousePos.x - wpos.x ) * nspx;
     }
-    else if( m_highlight.active && !IsMouseDown( 0 ) )
+    else if( m_highlight.active && !IsMouseDown( ImGuiMouseButton_Left ) )
     {
         if( ImGui::GetIO().KeyCtrl && m_highlight.start != m_highlight.end )
         {
@@ -42,16 +42,16 @@ void View::HandleTimelineMouse( int64_t timespan, const ImVec2& wpos, float w )
         m_highlight.active = false;
     }
 
-    if( IsMouseClicked( 2 ) )
+    if( IsMouseClicked( ImGuiMouseButton_Middle ) )
     {
         m_highlightZoom.active = true;
         m_highlightZoom.start = m_highlightZoom.end = m_vd.zvStart + ( io.MousePos.x - wpos.x ) * nspx;
     }
-    else if( IsMouseDragging( 2 ) )
+    else if( IsMouseDragging( ImGuiMouseButton_Middle ) )
     {
         m_highlightZoom.end = m_vd.zvStart + ( io.MousePos.x - wpos.x ) * nspx;
     }
-    else if( m_highlightZoom.active && !IsMouseDown( 2 )  )
+    else if( m_highlightZoom.active && !IsMouseDown( ImGuiMouseButton_Middle )  )
     {
         if( m_highlightZoom.start != m_highlightZoom.end )
         {
@@ -89,13 +89,13 @@ void View::HandleTimelineMouse( int64_t timespan, const ImVec2& wpos, float w )
     }
 
     const bool wheel_scroll = abs( io.MouseWheelH ) > abs( io.MouseWheel );
-    if( IsMouseDragging( 1 ) || wheel_scroll )
+    if( IsMouseDragging( ImGuiMouseButton_Right ) || wheel_scroll )
     {
         m_viewMode = ViewMode::Paused;
         m_viewModeHeuristicTry = false;
         m_zoomAnim.active = false;
         if( !m_playback.pause && m_playback.sync ) m_playback.pause = true;
-        const auto delta = GetMouseDragDelta( 1 );
+        const auto delta = GetMouseDragDelta( ImGuiMouseButton_Right );
         m_yDelta = delta.y;
         const auto hwheel_delta = io.MouseWheelH * 50.f * m_horizontalScrollMultiplier;
         const auto dpx = int64_t( (delta.x * nspx) + (hwheel_delta * nspx));
@@ -270,11 +270,7 @@ void View::DrawTimeline()
     m_zoneHover = nullptr;
     m_zoneHover2.Decay( nullptr );
     m_gpuHover = nullptr;
-    m_findZone.range.StartFrame();
-    m_statRange.StartFrame();
-    m_flameRange.StartFrame();
-    m_waitStackRange.StartFrame();
-    m_memInfo.range.StartFrame();
+    for( auto& r : m_ranges ) r.range->StartFrame();
     m_yDelta = 0;
     m_nextLockHighlight = { -1 };
 
@@ -292,6 +288,7 @@ void View::DrawTimeline()
 
     auto draw = ImGui::GetWindowDrawList();
     const auto w = ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ScrollbarSize;
+    if( w <= 0.f ) return;
     const auto timespan = m_vd.zvEnd - m_vd.zvStart;
     auto pxns = w / double( timespan );
 
@@ -300,15 +297,28 @@ void View::DrawTimeline()
     const bool drawMouseLine = ImGui::IsWindowHovered( ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem ) && ImGui::IsMouseHoveringRect( winpos, winpos + winsize, false );
     if( drawMouseLine )
     {
-        HandleRange( m_findZone.range, timespan, ImGui::GetCursorScreenPos(), w );
-        HandleRange( m_statRange, timespan, ImGui::GetCursorScreenPos(), w );
-        HandleRange( m_flameRange, timespan, ImGui::GetCursorScreenPos(), w );
-        HandleRange( m_waitStackRange, timespan, ImGui::GetCursorScreenPos(), w );
-        HandleRange( m_memInfo.range, timespan, ImGui::GetCursorScreenPos(), w );
+        for( auto& r : m_ranges ) HandleRange( *r.range, timespan, ImGui::GetCursorScreenPos(), w );
         for( auto& v : m_annotations )
         {
+            if( !v->visible ) continue;
             v->range.StartFrame();
             HandleRange( v->range, timespan, ImGui::GetCursorScreenPos(), w );
+        }
+        if( IsMouseClicked( ImGuiMouseButton_Left ) )
+        {
+            const auto ty = ImGui::GetTextLineHeight();
+            for( auto& ann : m_annotations )
+            {
+                if( !ann->visible || ann->range.min >= m_vd.zvEnd || ann->range.max <= m_vd.zvStart ) continue;
+                const auto aMin = ( ann->range.min - m_vd.zvStart ) * pxns;
+                const auto aMax = ( ann->range.max - m_vd.zvStart ) * pxns;
+                if( ImGui::IsMouseHoveringRect( linepos + ImVec2( aMin, lineh - ty * 1.5f ), linepos + ImVec2( aMax, lineh ) ) )
+                {
+                    m_selectedAnnotation = ann.get();
+                    ConsumeMouseEvents( ImGuiMouseButton_Left );
+                    break;
+                }
+            }
         }
         HandleTimelineMouse( timespan, ImGui::GetCursorScreenPos(), w );
     }
@@ -343,23 +353,19 @@ void View::DrawTimeline()
             }
         }
     }
+    DrawTimelineSections();
 
     const auto yMin = ImGui::GetCursorScreenPos().y;
     const auto yMax = linepos.y + lineh;
 
+    draw->AddLineH( winpos.x, winpos.x + ImGui::GetContentRegionAvail().x + 1, yMin - 1, 0x0FFFFFFF );
+
     ImGui::SetNextWindowContentSize( ImVec2( 0, m_tc.GetHeight() ) );
     ImGui::BeginChild( "##zoneWin", ImVec2( ImGui::GetContentRegionAvail().x, ImGui::GetContentRegionAvail().y ), false, ImGuiWindowFlags_AlwaysVerticalScrollbar | ImGuiWindowFlags_NoScrollWithMouse );
-
-    const auto verticallyCenterTimeline = true;
 
     if( m_yDelta != 0 )
     {
         auto& io = ImGui::GetIO();
-        if( !verticallyCenterTimeline )
-        {
-            auto y = ImGui::GetScrollY();
-            ImGui::SetScrollY( y - m_yDelta );
-        }
         io.MouseClickedPos[1].y = io.MousePos.y;
     }
 
@@ -371,9 +377,8 @@ void View::DrawTimeline()
     bool hover = ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect( wpos, wpos + ImVec2( w, h ) );
     draw = ImGui::GetWindowDrawList();
 
+    const auto scale = GetScale();
     const auto ty = ImGui::GetTextLineHeight();
-    const auto to = 9.f;
-    const auto th = ( ty - to ) * sqrt( 3 ) * 0.5;
 
     if( m_vd.drawGpuZones )
     {
@@ -389,24 +394,7 @@ void View::DrawTimeline()
     }
     if( m_vd.drawZones )
     {
-        const auto& threadData = m_worker.GetThreadData();
-        if( threadData.size() != m_threadOrder.size() )
-        {
-            m_threadOrder.reserve( threadData.size() );
-            // Only new threads are in the end of the worker's ThreadData vector.
-            // Threads which get reordered by received thread hints are not new, yet removed from m_threadOrder.
-            // Therefore, those are kept in the m_threadReinsert vector. As such, we will gather first threads from the
-            // reinsert vector, and afterwards the remaining ones must be new (and thus found at the end of threadData).
-            size_t numReinsert = m_threadReinsert.size();
-            size_t numNew = threadData.size() - m_threadOrder.size() - numReinsert;
-            for( size_t i = 0; i < numReinsert + numNew; i++ )
-            {
-                const ThreadData *td = i < numReinsert ? m_threadReinsert[i] : threadData[m_threadOrder.size()];
-                auto it = std::find_if( m_threadOrder.begin(), m_threadOrder.end(), [td]( const auto t ) { return td->groupHint < t->groupHint; } );
-                m_threadOrder.insert( it, td );
-            }
-            m_threadReinsert.clear();
-        }
+        UpdateThreadOrder();
         for( const auto& v : m_threadOrder )
         {
             m_tc.AddItem<TimelineItemThread>( v );
@@ -420,25 +408,34 @@ void View::DrawTimeline()
         }
     }
 
-    const auto vcenter = verticallyCenterTimeline && drawMouseLine && m_viewMode == ViewMode::Paused;
+    const auto vcenter = drawMouseLine && m_viewMode == ViewMode::Paused;
     m_tc.End( pxns, wpos, hover, vcenter, yMin, yMax );
     ImGui::EndChild();
 
     m_lockHighlight = m_nextLockHighlight;
 
+    const auto iconSize = ImGui::CalcTextSize( ICON_FA_NOTE_STICKY );
     for( auto& ann : m_annotations )
     {
-        if( ann->range.min < m_vd.zvEnd && ann->range.max > m_vd.zvStart )
+        if( ann->visible && ann->range.min < m_vd.zvEnd && ann->range.max > m_vd.zvStart )
         {
-            uint32_t c0 = ( ann->color & 0xFFFFFF ) | ( m_selectedAnnotation == ann.get() ? 0x44000000 : 0x22000000 );
-            uint32_t c1 = ( ann->color & 0xFFFFFF ) | ( m_selectedAnnotation == ann.get() ? 0x66000000 : 0x44000000 );
-            uint32_t c2 = ( ann->color & 0xFFFFFF ) | ( m_selectedAnnotation == ann.get() ? 0xCC000000 : 0xAA000000 );
-            draw->AddRectFilled( linepos + ImVec2( ( ann->range.min - m_vd.zvStart ) * pxns, 0 ), linepos + ImVec2( ( ann->range.max - m_vd.zvStart ) * pxns, lineh ), c0 );
-            DrawLine( draw, linepos + ImVec2( ( ann->range.min - m_vd.zvStart ) * pxns + 0.5f, 0.5f ), linepos + ImVec2( ( ann->range.min - m_vd.zvStart ) * pxns + 0.5f, lineh + 0.5f ), ann->range.hiMin ? c2 : c1, ann->range.hiMin ? 2 : 1 );
-            DrawLine( draw, linepos + ImVec2( ( ann->range.max - m_vd.zvStart ) * pxns + 0.5f, 0.5f ), linepos + ImVec2( ( ann->range.max - m_vd.zvStart ) * pxns + 0.5f, lineh + 0.5f ), ann->range.hiMax ? c2 : c1, ann->range.hiMax ? 2 : 1 );
-            if( drawMouseLine && ImGui::IsMouseHoveringRect( linepos + ImVec2( ( ann->range.min - m_vd.zvStart ) * pxns, 0 ), linepos + ImVec2( ( ann->range.max - m_vd.zvStart ) * pxns, lineh ) ) )
+            uint32_t c0 = ( ann->color & 0xFFFFFF ) | ( m_selectedAnnotation == ann.get() ? 0x22000000 : 0x11000000 );
+            uint32_t c1 = ( ann->color & 0xFFFFFF ) | ( m_selectedAnnotation == ann.get() ? 0x88000000 : 0x66000000 );
+            uint32_t c2 = ( ann->color & 0xFFFFFF ) | ( m_selectedAnnotation == ann.get() ? 0xDD000000 : 0xBB000000 );
+
+            const auto aMin = ( ann->range.min - m_vd.zvStart ) * pxns;
+            const auto aMax = ( ann->range.max - m_vd.zvStart ) * pxns;
+
+            draw->AddRectFilled( linepos + ImVec2( aMin, 0 ), linepos + ImVec2( aMax, lineh ), c0 );
+            draw->AddRectFilled( linepos + ImVec2( aMin + 1, lineh - ty * 1.5f ), linepos + ImVec2( aMax - 1, lineh ), 0x88000000 );
+            DrawLine( draw, linepos + ImVec2( aMin + 0.5f, 0.5f ), linepos + ImVec2( aMin + 0.5f, lineh + 0.5f ), ann->range.hiMin ? c2 : c1, ann->range.hiMin ? 2 : 1 );
+            DrawLine( draw, linepos + ImVec2( aMax - 0.5f, 0.5f ), linepos + ImVec2( aMax - 0.5f, lineh + 0.5f ), ann->range.hiMax ? c2 : c1, ann->range.hiMax ? 2 : 1 );
+
+            if( drawMouseLine && ImGui::IsMouseHoveringRect( linepos + ImVec2( aMin, 0 ), linepos + ImVec2( aMax, lineh ) ) )
             {
                 ImGui::BeginTooltip();
+                TextDisabledUnformatted( ICON_FA_NOTE_STICKY );
+                ImGui::SameLine();
                 if( ann->text.empty() )
                 {
                     TextDisabledUnformatted( "Empty annotation" );
@@ -453,27 +450,22 @@ void View::DrawTimeline()
                 TextFocused( "Annotation length:", TimeToString( ann->range.max - ann->range.min ) );
                 ImGui::EndTooltip();
             }
-            const auto aw = ( ann->range.max - ann->range.min ) * pxns;
-            if( aw > th * 4 )
-            {
-                draw->AddCircleFilled( linepos + ImVec2( ( ann->range.min - m_vd.zvStart ) * pxns + th * 2, th * 2 ), th, 0x88AABB22 );
-                draw->AddCircle( linepos + ImVec2( ( ann->range.min - m_vd.zvStart ) * pxns + th * 2, th * 2 ), th, 0xAAAABB22 );
-                if( drawMouseLine && IsMouseClicked( 0 ) && ImGui::IsMouseHoveringRect( linepos + ImVec2( ( ann->range.min - m_vd.zvStart ) * pxns + th, th ), linepos + ImVec2( ( ann->range.min - m_vd.zvStart ) * pxns + th * 3, th * 3 ) ) )
-                {
-                    m_selectedAnnotation = ann.get();
-                }
 
+            const auto aw = ( ann->range.max - ann->range.min ) * pxns;
+            if( aw > ty + iconSize.x )
+            {
+                draw->AddText( linepos + ImVec2( aMin + ty * 0.5f, lineh - ty * 1.25f ), ann->color | 0xFF000000, ICON_FA_NOTE_STICKY );
                 if( !ann->text.empty() )
                 {
                     const auto tw = ImGui::CalcTextSize( ann->text.c_str() ).x;
-                    if( aw - th*4 > tw )
+                    if( aw > ty + iconSize.x + tw )
                     {
-                        draw->AddText( linepos + ImVec2( ( ann->range.min - m_vd.zvStart ) * pxns + th * 4, th * 0.5 ), 0xFFFFFFFF, ann->text.c_str() );
+                        draw->AddText( linepos + ImVec2( aMin + ty + iconSize.x, lineh - ty * 1.25f ), 0xFFFFFFFF, ann->text.c_str() );
                     }
                     else
                     {
-                        draw->PushClipRect( linepos + ImVec2( ( ann->range.min - m_vd.zvStart ) * pxns, 0 ), linepos + ImVec2( ( ann->range.max - m_vd.zvStart ) * pxns, lineh ), true );
-                        draw->AddText( linepos + ImVec2( ( ann->range.min - m_vd.zvStart ) * pxns + th * 4, th * 0.5 ), 0xFFFFFFFF, ann->text.c_str() );
+                        draw->PushClipRect( linepos + ImVec2( aMin + 1, lineh - ty * 1.5f ), linepos + ImVec2( aMax - 1, lineh ) );
+                        draw->AddText( linepos + ImVec2( aMin + ty + iconSize.x, lineh - ty * 1.25f ), 0xFFFFFFFF, ann->text.c_str() );
                         draw->PopClipRect();
                     }
                 }
@@ -496,57 +488,26 @@ void View::DrawTimeline()
         draw->AddRect( ImVec2( wpos.x + px0, linepos.y ), ImVec2( wpos.x + px1, linepos.y + lineh ), 0x4488DD88 );
     }
 
-    const auto scale = GetScale();
-    if( m_findZone.range.active && ( m_findZone.show || m_showRanges ) )
+    int idx = 0;
+    for( auto& r : m_ranges )
     {
-        const auto px0 = ( m_findZone.range.min - m_vd.zvStart ) * pxns;
-        const auto px1 = std::max( px0 + std::max( 1.0, pxns * 0.5 ), ( m_findZone.range.max - m_vd.zvStart ) * pxns );
-        DrawStripedRect( draw, wpos, px0, linepos.y, px1, linepos.y + lineh, 10 * scale, 0x2288DD88, true, true );
-        DrawLine( draw, ImVec2( dpos.x + px0, linepos.y + 0.5f ), ImVec2( dpos.x + px0, linepos.y + lineh + 0.5f ), m_findZone.range.hiMin ? 0x9988DD88 : 0x3388DD88, m_findZone.range.hiMin ? 2 : 1 );
-        DrawLine( draw, ImVec2( dpos.x + px1, linepos.y + 0.5f ), ImVec2( dpos.x + px1, linepos.y + lineh + 0.5f ), m_findZone.range.hiMax ? 0x9988DD88 : 0x3388DD88, m_findZone.range.hiMax ? 2 : 1 );
-    }
-
-    if( m_statRange.active && ( m_showStatistics || m_showRanges || ( m_sourceViewFile && m_sourceView->IsSymbolView() ) ) )
-    {
-        const auto px0 = ( m_statRange.min - m_vd.zvStart ) * pxns;
-        const auto px1 = std::max( px0 + std::max( 1.0, pxns * 0.5 ), ( m_statRange.max - m_vd.zvStart ) * pxns );
-        DrawStripedRect( draw, wpos, px0, linepos.y, px1, linepos.y + lineh, 10 * scale, 0x228888EE, true, false );
-        DrawLine( draw, ImVec2( dpos.x + px0, linepos.y + 0.5f ), ImVec2( dpos.x + px0, linepos.y + lineh + 0.5f ), m_statRange.hiMin ? 0x998888EE : 0x338888EE, m_statRange.hiMin ? 2 : 1 );
-        DrawLine( draw, ImVec2( dpos.x + px1, linepos.y + 0.5f ), ImVec2( dpos.x + px1, linepos.y + lineh + 0.5f ), m_statRange.hiMax ? 0x998888EE : 0x338888EE, m_statRange.hiMax ? 2 : 1 );
-    }
-
-    if( m_flameRange.active && ( m_showFlameGraph || m_showRanges ) )
-    {
-        const auto px0 = ( m_flameRange.min - m_vd.zvStart ) * pxns;
-        const auto px1 = std::max( px0 + std::max( 1.0, pxns * 0.5 ), ( m_flameRange.max - m_vd.zvStart ) * pxns );
-        DrawStripedRect( draw, wpos, px0, linepos.y, px1, linepos.y + lineh, 10 * scale, 0x2288B5EE, true, false );
-        DrawLine( draw, ImVec2( dpos.x + px0, linepos.y + 0.5f ), ImVec2( dpos.x + px0, linepos.y + lineh + 0.5f ), m_flameRange.hiMin ? 0x9988B5EE : 0x3388B5EE, m_flameRange.hiMin ? 2 : 1 );
-        DrawLine( draw, ImVec2( dpos.x + px1, linepos.y + 0.5f ), ImVec2( dpos.x + px1, linepos.y + lineh + 0.5f ), m_flameRange.hiMax ? 0x9988B5EE : 0x3388B5EE, m_flameRange.hiMax ? 2 : 1 );
-    }
-
-    if( m_waitStackRange.active && ( m_showWaitStacks || m_showRanges ) )
-    {
-        const auto px0 = ( m_waitStackRange.min - m_vd.zvStart ) * pxns;
-        const auto px1 = std::max( px0 + std::max( 1.0, pxns * 0.5 ), ( m_waitStackRange.max - m_vd.zvStart ) * pxns );
-        DrawStripedRect( draw, wpos, px0, linepos.y, px1, linepos.y + lineh, 10 * scale, 0x22EEB588, true, true );
-        DrawLine( draw, ImVec2( dpos.x + px0, linepos.y + 0.5f ), ImVec2( dpos.x + px0, linepos.y + lineh + 0.5f ), m_waitStackRange.hiMin ? 0x99EEB588 : 0x33EEB588, m_waitStackRange.hiMin ? 2 : 1 );
-        DrawLine( draw, ImVec2( dpos.x + px1, linepos.y + 0.5f ), ImVec2( dpos.x + px1, linepos.y + lineh + 0.5f ), m_waitStackRange.hiMax ? 0x99EEB588 : 0x33EEB588, m_waitStackRange.hiMax ? 2 : 1 );
-    }
-
-    if( m_memInfo.range.active && ( m_memInfo.show || m_showRanges ) )
-    {
-        const auto px0 = ( m_memInfo.range.min - m_vd.zvStart ) * pxns;
-        const auto px1 = std::max( px0 + std::max( 1.0, pxns * 0.5 ), ( m_memInfo.range.max - m_vd.zvStart ) * pxns );
-        DrawStripedRect( draw, wpos, px0, linepos.y, px1, linepos.y + lineh, 10 * scale, 0x2288EEE3, true, false );
-        DrawLine( draw, ImVec2( dpos.x + px0, linepos.y + 0.5f ), ImVec2( dpos.x + px0, linepos.y + lineh + 0.5f ), m_memInfo.range.hiMin ? 0x9988EEE3 : 0x3388EEE3, m_memInfo.range.hiMin ? 2 : 1 );
-        DrawLine( draw, ImVec2( dpos.x + px1, linepos.y + 0.5f ), ImVec2( dpos.x + px1, linepos.y + lineh + 0.5f ), m_memInfo.range.hiMax ? 0x9988EEE3 : 0x3388EEE3, m_memInfo.range.hiMax ? 2 : 1 );
+        if( r.range->active && ShouldDrawRange( RangeId( idx ) ) )
+        {
+            const auto px0 = ( r.range->min - m_vd.zvStart ) * pxns;
+            const auto px1 = std::max( px0 + std::max( 1.0, pxns * 0.5 ), ( r.range->max - m_vd.zvStart ) * pxns );
+            const auto alpha = ( r.range->hiMin || r.range->hiMax ) ? 0x12000000 : 0x06000000;
+            DrawStripedRect( draw, wpos, px0, linepos.y, px1, linepos.y + lineh, 10 * scale, r.color | alpha, true, idx % 2 == 0 );
+            DrawLine( draw, ImVec2( dpos.x + px0, linepos.y + 0.5f ), ImVec2( dpos.x + px0, linepos.y + lineh + 0.5f ), r.color | ( r.range->hiMin ? 0x99000000 : 0x55000000 ), r.range->hiMin ? 2 : 1 );
+            DrawLine( draw, ImVec2( dpos.x + px1, linepos.y + 0.5f ), ImVec2( dpos.x + px1, linepos.y + lineh + 0.5f ), r.color | ( r.range->hiMax ? 0x99000000 : 0x55000000 ), r.range->hiMax ? 2 : 1 );
+        }
+        idx++;
     }
 
     if( m_setRangePopup.active || m_setRangePopupOpen )
     {
         const auto s = std::min( m_setRangePopup.min, m_setRangePopup.max );
         const auto e = std::max( m_setRangePopup.min, m_setRangePopup.max );
-        DrawStripedRect( draw, wpos, ( s - m_vd.zvStart ) * pxns, linepos.y, ( e - m_vd.zvStart ) * pxns, linepos.y + lineh, 5 * scale, 0x55DD8888, true, false );
+        DrawStripedRect( draw, wpos, ( s - m_vd.zvStart ) * pxns, linepos.y, ( e - m_vd.zvStart ) * pxns, linepos.y + lineh, 5 * scale, 0x11DD8888, true, false );
         draw->AddRect( ImVec2( wpos.x + ( s - m_vd.zvStart ) * pxns, linepos.y ), ImVec2( wpos.x + ( e - m_vd.zvStart ) * pxns, linepos.y + lineh ), 0x77DD8888 );
     }
 

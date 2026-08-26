@@ -224,7 +224,6 @@ const ZoneEvent* View::GetZoneChild( const ZoneEvent& zone, int64_t time ) const
 
 const ZoneEvent* View::GetZoneParent( const ZoneEvent& zone ) const
 {
-#ifndef TRACY_NO_STATISTICS
     if( m_worker.AreSourceLocationZonesReady() )
     {
         auto& slz = m_worker.GetZonesForSourceLocation( zone.SrcLoc() );
@@ -237,7 +236,6 @@ const ZoneEvent* View::GetZoneParent( const ZoneEvent& zone ) const
             }
         }
     }
-#endif
 
     for( const auto& thread : m_worker.GetThreadData() )
     {
@@ -307,7 +305,6 @@ const ZoneEvent* View::GetZoneParent( const ZoneEvent& zone, uint64_t tid ) cons
 
 bool View::IsZoneReentry( const ZoneEvent& zone ) const
 {
-#ifndef TRACY_NO_STATISTICS
     if( m_worker.AreSourceLocationZonesReady() )
     {
         auto& slz = m_worker.GetZonesForSourceLocation( zone.SrcLoc() );
@@ -320,7 +317,6 @@ bool View::IsZoneReentry( const ZoneEvent& zone ) const
             }
         }
     }
-#endif
 
     for( const auto& thread : m_worker.GetThreadData() )
     {
@@ -432,7 +428,6 @@ const GpuEvent* View::GetZoneParent( const GpuEvent& zone ) const
 
 const ThreadData* View::GetZoneThreadData( const ZoneEvent& zone ) const
 {
-#ifndef TRACY_NO_STATISTICS
     if( m_worker.AreSourceLocationZonesReady() )
     {
         auto& slz = m_worker.GetZonesForSourceLocation( zone.SrcLoc() );
@@ -445,7 +440,6 @@ const ThreadData* View::GetZoneThreadData( const ZoneEvent& zone ) const
             }
         }
     }
-#endif
 
     for( const auto& thread : m_worker.GetThreadData() )
     {
@@ -839,61 +833,75 @@ int64_t View::GetZoneSelfTime( const GpuEvent& zone )
     return selftime;
 }
 
-bool View::GetZoneRunningTime( const ContextSwitch* ctx, const ZoneEvent& ev, int64_t& time, uint64_t& cnt )
+uint64_t View::GetRunningCsRange( const ContextSwitch* ctx, int64_t start, int64_t end, const ContextSwitchData*& outRunningBegin, const ContextSwitchData*& outRunningEnd, bool* incomplete ) const
 {
-    auto it = std::lower_bound( ctx->v.begin(), ctx->v.end(), ev.Start(), [] ( const auto& l, const auto& r ) { return (uint64_t)l.End() < (uint64_t)r; } );
-    if( it == ctx->v.end() ) return false;
-    const auto end = m_worker.GetZoneEnd( ev );
-    const auto eit = std::upper_bound( it, ctx->v.end(), end, [] ( const auto& l, const auto& r ) { return l < r.Start(); } );
-    if( eit == ctx->v.end() ) return false;
-    cnt = std::distance( it, eit );
-    if( cnt == 0 ) return false;
-    if( cnt == 1 )
+    if( incomplete ) *incomplete = false;
+
+    outRunningBegin = std::lower_bound( ctx->v.begin(), ctx->v.end(), start, []( const ContextSwitchData& l, int64_t r ) { return l.EndOrStart() < r; } );
+    if( outRunningBegin == ctx->v.end() )
     {
-        time = end - ev.Start();
+        outRunningEnd = ctx->v.end();
+        return 0; // No data
     }
-    else
-    {
-        int64_t running = it->End() - ev.Start();
-        ++it;
-        for( uint64_t i=0; i<cnt-2; i++ )
-        {
-            running += it->End() - it->Start();
-            ++it;
-        }
-        running += end - it->Start();
-        time = running;
-    }
-    return true;
+
+    outRunningEnd = std::upper_bound( outRunningBegin, ctx->v.end(), end, []( int64_t l, const ContextSwitchData& r ) { return l < r.Start(); } );
+    if( incomplete ) *incomplete = outRunningEnd == ctx->v.end();
+    return std::distance( outRunningBegin, outRunningEnd );
 }
 
-bool View::GetZoneRunningTime( const ContextSwitch* ctx, const ZoneEvent& ev, const RangeSlim& range, int64_t& time, uint64_t& cnt )
+void View::ComputeRunningTime( int64_t start, int64_t end, const ContextSwitchData* it, const ContextSwitchData* eit, int64_t& time, uint8_t* cpus/*[256]*/ ) const
 {
-    const auto start = std::max( ev.Start(), range.min );
-    auto it = std::lower_bound( ctx->v.begin(), ctx->v.end(), start, [] ( const auto& l, const auto& r ) { return (uint64_t)l.End() < (uint64_t)r; } );
-    if( it == ctx->v.end() ) return false;
-    const auto end = std::min( m_worker.GetZoneEnd( ev ), range.max );
-    const auto eit = std::upper_bound( it, ctx->v.end(), end, [] ( const auto& l, const auto& r ) { return l < r.Start(); } );
-    if( eit == ctx->v.end() ) return false;
-    cnt = std::distance( it, eit );
-    if( cnt == 0 ) return false;
+    const ptrdiff_t cnt = std::distance( it, eit );
+    if( cnt <= 0 )
+    {
+        time = 0;
+        return;
+    }
+
+    // First CS start may be past `start` if the thread was sleeping or the previous CS was incomplete.
+    const int64_t runStart = std::max( start, it->Start() );
+
     if( cnt == 1 )
     {
-        time = end - start;
+        time = end - runStart;
     }
     else
     {
-        int64_t running = it->End() - start;
+        int64_t running = it->EndOrStart() - runStart;
+        if( cpus ) cpus[it->Cpu()] = 1;
         ++it;
         for( uint64_t i=0; i<cnt-2; i++ )
         {
-            running += it->End() - it->Start();
+            running += it->EndOrStart() - it->Start();
+            if( cpus ) cpus[it->Cpu()] = 1;
             ++it;
         }
         running += end - it->Start();
+        if( cpus ) cpus[it->Cpu()] = 1;
         time = running;
     }
-    return true;
+}
+
+uint64_t View::GetZoneRunningTime( const ContextSwitch* ctx, const ZoneEvent& ev, int64_t& time, bool* incomplete ) const
+{
+    const ContextSwitchData* it = nullptr;
+    const ContextSwitchData* eit = nullptr;
+    const int64_t start = ev.Start();
+    const int64_t end = m_worker.GetZoneEnd( ev );
+    const uint64_t cnt = GetRunningCsRange( ctx, start, end, it, eit, incomplete );
+    ComputeRunningTime( start, end, it, eit, time, nullptr );
+    return cnt;
+}
+
+uint64_t View::GetZoneRunningTime( const ContextSwitch* ctx, const ZoneEvent& ev, const RangeSlim& range, int64_t& time, bool* incomplete ) const
+{
+    const ContextSwitchData* it = nullptr;
+    const ContextSwitchData* eit = nullptr;
+    const int64_t start = std::max( ev.Start(), range.min );
+    const int64_t end = std::min( m_worker.GetZoneEnd( ev ), range.max );
+    const uint64_t cnt = GetRunningCsRange( ctx, start, end, it, eit, incomplete );
+    ComputeRunningTime( start, end, it, eit, time, nullptr );
+    return cnt;
 }
 
 const char* View::SourceSubstitution( const char* srcFile ) const
@@ -1077,11 +1085,7 @@ nlohmann::json View::GetCallstackJson( const CallstackFrameId* data, size_t size
     while( data < end )
     {
         auto& entry = *data++;
-#ifdef TRACY_NO_STATISTICS
-        auto frameData = m_worker.GetCallstackFrame( entry );
-#else
-        auto frameData = entry.custom ? m_worker.GetParentCallstackFrame( entry ) : m_worker.GetCallstackFrame( entry );
-#endif
+        auto frameData = entry.custom ? m_worker.GetSyntheticCallstackFrame( entry ) : m_worker.GetCallstackFrame( entry );
         if( !frameData )
         {
             frames.push_back( { "pointer", m_worker.GetCanonicalPointer( entry ) } );
@@ -1172,9 +1176,23 @@ std::vector<CallstackFrameId> View::ReconstructZoneCallstack( const ZoneEvent& e
     auto end = std::lower_bound( it, td->samples.end(), m_worker.GetZoneEnd( ev ), [] ( const auto& l, const auto& r ) { return l.time.Val() < r; } );
     if( std::distance( it, end ) > SampleLimit ) end = it + SampleLimit;
 
+    // Context switch samples are excluded, as they are always parked at the scheduler
+    // and would compete with the zone's real call stacks.
+    const SampleData* cit = std::lower_bound( td->ctxSwitchSamples.begin(), td->ctxSwitchSamples.end(), ev.Start(), [] ( const auto& l, const auto& r ) { return l.time.Val() < r; } );
+
     unordered_flat_map<uint64_t, unordered_flat_set<uint32_t>> roots;
     while( it != end )
     {
+        if( cit != td->ctxSwitchSamples.end() )
+        {
+            const auto t = it->time.Val();
+            cit = std::lower_bound( cit, td->ctxSwitchSamples.end(), t, [] ( const auto& l, const auto& r ) { return l.time.Val() < r; } );
+            if( cit != td->ctxSwitchSamples.end() && cit->time.Val() == t )
+            {
+                ++it;
+                continue;
+            }
+        }
         auto stack = it->callstack.Val();
         auto& cs = m_worker.GetCallstack( stack );
         auto root = cs.back().data;
@@ -1285,6 +1303,37 @@ std::vector<CallstackFrameId> View::ReconstructZoneCallstack( const ZoneEvent& e
     }
 
     return ret;
+}
+
+bool View::CallstackHasLocals( const CallstackFrameId* data, size_t size ) const
+{
+    auto end = data + size;
+    while( data < end )
+    {
+        auto frameData = m_worker.GetCallstackFrame( *data++ );
+        if( !frameData ) continue;
+        const auto& frame = frameData->data[frameData->size - 1];
+        if( !m_worker.IsFrameExternal( frame.file, frameData->imageName ) ) return true;
+    }
+    return false;
+}
+
+void View::ValidateSourceRegex()
+{
+    bool regexValid = true;
+    for( auto& v : m_sourceSubstitutions )
+    {
+        try
+        {
+            v.regex.assign( v.pattern );
+        }
+        catch( std::regex_error& )
+        {
+            regexValid = false;
+            break;
+        }
+    }
+    m_sourceRegexValid = regexValid;
 }
 
 }

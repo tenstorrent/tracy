@@ -79,7 +79,6 @@ bool View::DrawConnection()
 
     FrameImage lastFrameImage{};
     {
-        Worker::MainThreadDataLockGuard lock = m_worker.ObtainLockForMainThread();
         ImGui::SameLine();
         TextFocused( "+", RealToString( m_worker.GetSendInFlight() ) );
         const auto sz = m_worker.GetFrameCount( *m_frames );
@@ -94,7 +93,7 @@ bool View::DrawConnection()
             TextFocused( "Frame time:", TimeToString( dt ) );
         }        
         const auto& fis = m_worker.GetFrameImages();
-        // Keep a copy here since the worker may modify the frame images vector while we do not own the lock
+        // Keep a copy so the frame image data is retained independently of the worker storage.
         if( !fis.empty() ) lastFrameImage = *fis.back();
     }
 
@@ -105,7 +104,7 @@ bool View::DrawConnection()
     }
 
     ImGui::Separator();
-    if( ImGui::Button( ICON_FA_FLOPPY_DISK " Save trace" ) && m_saveThreadState.load( std::memory_order_relaxed ) == SaveThreadState::Inert )
+    if( ImGui::Button( ICON_FA_FLOPPY_DISK " Save trace…" ) && m_saveThreadState.load( std::memory_order_relaxed ) == SaveThreadState::Inert )
     {
         auto cb = [this]( const char* fn ) {
             const auto sz = strlen( fn );
@@ -130,7 +129,6 @@ bool View::DrawConnection()
 
     ImGui::SameLine( 0, 2 * ty );
     const char* stopStr = ICON_FA_PLUG " Stop";
-    Worker::MainThreadDataLockGuard lock = m_worker.ObtainLockForMainThread();
     if( !m_disconnectIssued && m_worker.IsConnected() )
     {
         if( ImGui::Button( stopStr ) )
@@ -203,21 +201,33 @@ bool View::DrawConnection()
                         ImGui::TextUnformatted( m_worker.GetString( p.name ) );
                         ImGui::TableNextColumn();
                         ImGui::PushID( idx );
-                        if( p.isBool )
+                        switch( p.type )
+                        {
+                        case ParameterType::Boolean:
                         {
                             bool val = p.val;
                             if( ImGui::Checkbox( "", &val ) )
                             {
                                 m_worker.SetParameter( idx, int32_t( val ) );
                             }
+                            break;
                         }
-                        else
+                        case ParameterType::Integer:
                         {
                             auto val = int( p.val );
+                            ImGui::SetNextItemWidth( 100 * GetScale() );
                             if( ImGui::InputInt( "", &val, 1, 100, ImGuiInputTextFlags_EnterReturnsTrue ) )
                             {
                                 m_worker.SetParameter( idx, int32_t( val ) );
                             }
+                            break;
+                        }
+                        case ParameterType::Trigger:
+                            if( ImGui::Button( ICON_FA_CIRCLE_DOT ) )
+                            {
+                                m_worker.SetParameter( idx, p.val );
+                            }
+                            break;
                         }
                         ImGui::PopID();
                         idx++;

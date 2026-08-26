@@ -116,7 +116,7 @@ namespace tracy {
             // delta -- but our anchor gpuTime is ~0 while device timestamps are absolute (~5e9 ns), so that
             // delta is bogus and calibrationMod comes out ~0.11, shrinking every zone duration ~9x. Omitting
             // the flag keeps durations correct (was GpuContextCalibration).
-            MemWrite(&item->gpuNewContext.flags, (uint8_t)0);
+            MemWrite(&item->gpuNewContext.flags, GpuContextFlags{});
             Profiler::QueueSerialFinish();
 
             mm_tcpu = tcpu;
@@ -147,7 +147,7 @@ namespace tracy {
             MemWrite(&item->gpuNewContext.period, (float)1.0f);
             MemWrite(&item->gpuNewContext.type, GpuContextType::tt_device);
             MemWrite(&item->gpuNewContext.context, GetId());
-            MemWrite(&item->gpuNewContext.flags, (uint8_t)GpuContextCalibration);
+            MemWrite(&item->gpuNewContext.flags, GpuContextCalibration);
             Profiler::QueueSerialFinish();
             mm_tcpu = tcpu;
         }
@@ -166,7 +166,7 @@ namespace tracy {
             MemWrite(&item->gpuNewContext.period, (float)1.0f);
             MemWrite(&item->gpuNewContext.type, GpuContextType::tt_device);
             MemWrite(&item->gpuNewContext.context, GetId());
-            MemWrite(&item->gpuNewContext.flags, (uint8_t)GpuContextCalibration);
+            MemWrite(&item->gpuNewContext.flags, GpuContextCalibration);
             TracyLfqCommit;
             mm_tcpu = tcpu;
         }
@@ -344,7 +344,7 @@ namespace tracy {
 
             auto zoneTime = Profiler::QueueSerial();
             MemWrite(&zoneTime->hdr.type, QueueType::GpuTime);
-            MemWrite(&zoneTime->gpuTime.gpuTime, (uint64_t)round((double)marker.timestamp / m_frequency));
+            MemWrite(&zoneTime->gpuTime.gpuTime, (int64_t)round((double)marker.timestamp / m_frequency));
             MemWrite(&zoneTime->gpuTime.queryId, (uint16_t)queryId);
             MemWrite(&zoneTime->gpuTime.context, this->GetId());
             Profiler::QueueSerialFinish();
@@ -442,7 +442,7 @@ namespace tracy {
 
             auto zoneTime = Profiler::QueueSerial();
             MemWrite(&zoneTime->hdr.type, QueueType::GpuTime);
-            MemWrite(&zoneTime->gpuTime.gpuTime, (uint64_t)round((double)marker.timestamp / m_frequency));
+            MemWrite(&zoneTime->gpuTime.gpuTime, (int64_t)round((double)marker.timestamp / m_frequency));
             MemWrite(&zoneTime->gpuTime.queryId, (uint16_t)queryId);
             MemWrite(&zoneTime->gpuTime.context, this->GetId());
             Profiler::QueueSerialFinish();

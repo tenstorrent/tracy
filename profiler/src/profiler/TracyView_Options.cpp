@@ -302,6 +302,65 @@ void View::DrawOptions()
         DefaultMarker(default_markers_active);
     }
 
+    const auto& sections = m_worker.GetSections();
+    if( !sections.empty() )
+    {
+        ImGui::Separator();
+        val = m_vd.drawSections;
+        ImGui::Checkbox( ICON_FA_ARROWS_LEFT_RIGHT_TO_LINE " Draw sections", &val );
+        m_vd.drawSections = val;
+
+        const auto& categories = m_worker.GetSectionDescriptions();
+        if( categories.size() > 1 )
+        {
+            const auto expand = ImGui::TreeNode( "Sections" );
+            ImGui::SameLine();
+            size_t visible = 0;
+            for( const auto& v : categories ) if( Vis( v.first ) ) visible++;
+            if( visible == categories.size() )
+            {
+                ImGui::TextDisabled( "(%zu)", categories.size() );
+            }
+            else
+            {
+                ImGui::TextDisabled( "(%zu/%zu)", visible, categories.size() );
+            }
+            if( expand )
+            {
+                ImGui::SameLine();
+                if( ImGui::SmallButton( "Select all" ) )
+                {
+                    for( const auto& v : categories )
+                    {
+                        Vis( v.first ) = true;
+                    }
+                }
+                ImGui::SameLine();
+                if( ImGui::SmallButton( "Unselect all" ) )
+                {
+                    for( const auto& v : categories )
+                    {
+                        Vis( v.first ) = false;
+                    }
+                }
+                int idx = 0;
+                for( const auto& v : categories )
+                {
+                    ImGui::PushID( idx++ );
+                    SmallCheckbox( m_worker.GetSectionCategoryDescription( v.first ), &Vis( v.first ) );
+                    auto it = sections.find( v.first );
+                    if( it != sections.end() )
+                    {
+                        ImGui::SameLine();
+                        ImGui::TextDisabled( "(%s)", RealToString( it->second.size() ) );
+                    }
+                    ImGui::PopID();
+                }
+                ImGui::TreePop();
+            }
+        }
+    }
+
     const auto& gpuData = m_worker.GetGpuData();
     if( !gpuData.empty() )
     {
@@ -471,7 +530,6 @@ void View::DrawOptions()
     ImGui::Indent();
     m_vd.drawZones = val;
 
-#ifndef TRACY_NO_STATISTICS
     if( m_worker.AreGhostZonesReady() && m_worker.GetGhostZonesCount() != 0 )
     {
         val = m_vd.ghostZones;
@@ -479,7 +537,6 @@ void View::DrawOptions()
         m_vd.ghostZones = val;
         DefaultMarker(default_markers_active);
     }
-#endif
 
     int ival = m_vd.dynamicColors;
     ImGui::TextUnformatted( ICON_FA_PALETTE " Zone colors" );
@@ -651,7 +708,7 @@ void View::DrawOptions()
                         ImGui::TextDisabled( "(%s) %s", RealToString( l.second->timeline.size() ), LocationToString( fileName, sl.line ) );
                         if( ImGui::IsItemHovered() )
                         {
-                            DrawSourceTooltip( fileName, sl.line, 1, 1 );
+                            DrawSourceTooltip( fileName, sl.line, sl.line, 1, 1 );
                             if( ImGui::IsItemClicked( 1 ) )
                             {
                                 if( SourceFileValid( fileName, m_worker.GetCaptureTime(), *this, m_worker ) )
@@ -738,7 +795,7 @@ void View::DrawOptions()
                         ImGui::TextDisabled( "(%s) %s", RealToString( l.second->timeline.size() ), LocationToString( fileName, sl.line ) );
                         if( ImGui::IsItemHovered() )
                         {
-                            DrawSourceTooltip( fileName, sl.line, 1, 1 );
+                            DrawSourceTooltip( fileName, sl.line, sl.line, 1, 1 );
                             if( ImGui::IsItemClicked( 1 ) )
                             {
                                 if( SourceFileValid( fileName, m_worker.GetCaptureTime(), *this, m_worker ) )
@@ -825,7 +882,7 @@ void View::DrawOptions()
                         ImGui::TextDisabled( "(%s) %s", RealToString( l.second->timeline.size() ), LocationToString( fileName, sl.line ) );
                         if( ImGui::IsItemHovered() )
                         {
-                            DrawSourceTooltip( fileName, sl.line, 1, 1 );
+                            DrawSourceTooltip( fileName, sl.line, sl.line, 1, 1 );
                             if( ImGui::IsItemClicked( 1 ) )
                             {
                                 if( SourceFileValid( fileName, m_worker.GetCaptureTime(), *this, m_worker ) )
@@ -938,12 +995,7 @@ void View::DrawOptions()
         ImGui::SameLine();
         if( ImGui::SmallButton( "Sort" ) )
         {
-            pdqsort_branchless( m_threadOrder.begin(), m_threadOrder.end(), [this] ( const auto& lhs, const auto& rhs ) {
-                if( lhs->groupHint != rhs->groupHint ) return lhs->groupHint < rhs->groupHint;
-                const auto cmp = strcmp( m_worker.GetThreadName( lhs->id ), m_worker.GetThreadName( rhs->id ) );
-                if( cmp != 0 ) return cmp < 0;
-                return lhs->id < rhs->id;
-            } );
+            SortThreads();
         }
 
         const auto wposx = ImGui::GetCursorScreenPos().x;
@@ -980,11 +1032,11 @@ void View::DrawOptions()
                     ImGui::BeginTooltip();
                     ImGui::TextUnformatted( "Crashed" );
                     ImGui::EndTooltip();
-                    if( IsMouseClicked( 0 ) )
+                    if( IsMouseClicked( ImGuiMouseButton_Left ) )
                     {
                         m_showInfo = true;
                     }
-                    if( IsMouseClicked( 2 ) )
+                    if( IsMouseClicked( ImGuiMouseButton_Middle ) )
                     {
                         CenterAtTime( crash.time );
                     }
@@ -1013,7 +1065,7 @@ void View::DrawOptions()
                 if( ImGui::BeginDragDropTargetCustom( ImRect( wposx, m_threadDnd[i] - half, wposx + w, m_threadDnd[i] + half ), i+1 ) )
                 {
                     auto draw = ImGui::GetWindowDrawList();
-                    draw->AddLine( ImVec2( wposx, m_threadDnd[i] ), ImVec2( wposx + w, m_threadDnd[i] ), ImGui::GetColorU32(ImGuiCol_DragDropTarget), 2.f );
+                    draw->AddLineH( wposx, wposx + w, m_threadDnd[i], ImGui::GetColorU32(ImGuiCol_DragDropTarget), 2.f );
                     if( auto payload = ImGui::AcceptDragDropPayload( "ThreadOrder", ImGuiDragDropFlags_AcceptNoDrawDefaultRect ) )
                     {
                         target = (int)i;
@@ -1105,12 +1157,14 @@ void View::DrawOptions()
     {
         // Keep in sync with TracyView.cpp View::SetupConfig()
         s_config.targetFps = m_vd.frameTarget;
+        s_config.drawFrameTargets = m_vd.drawFrameTargets;
         s_config.dynamicColors = m_vd.dynamicColors;
         s_config.forceColors = m_vd.forceColors;
         s_config.ghostZones = m_vd.ghostZones;
         s_config.shortenName = (int)m_vd.shortenName;
         s_config.drawSamples = m_vd.drawSamples;
         s_config.drawContextSwitches = m_vd.drawContextSwitches;
+        s_config.plotHeight = m_vd.plotHeight;
         SaveConfig();
     }
 

@@ -32,6 +32,17 @@ void* memmem( const void* haystack, size_t hsize, const char* needle, size_t nsi
 namespace tracy
 {
 
+static constexpr std::array FontSizes = {
+    1.f,    // normal text
+    1.6f,   // h1
+    1.5f,   // h2
+    1.4f,   // h3
+    1.3f,   // h4
+    1.2f,   // h5
+    1.1f,   // h6
+    0.75f,  // footnote
+};
+
 class MarkdownContext
 {
     struct List
@@ -140,6 +151,55 @@ public:
         case MD_BLOCK_TD:
             ImGui::TableNextColumn();
             break;
+        case MD_BLOCK_FOOTNOTE_DEF_SECTION:
+            Separate();
+            ImGui::Separator();
+            header = 7;
+            break;
+        case MD_BLOCK_FOOTNOTE_DEF:
+        {
+            ImGui::Dummy( ImVec2( 0, ImGui::GetTextLineHeight() * 0.5f ) );
+            auto footnote = ((MD_BLOCK_FOOTNOTE_DEF_DETAIL*)detail);
+            ImGui::PushFont( g_fonts.normal, FontNormal * FontSizes[header] );
+            PrintTextExt( footnote->label.text, footnote->label.text + footnote->label.size, false );
+            Glue();
+            ImGui::TextUnformatted( ". " );
+            break;
+        }
+        case MD_BLOCK_ADMONITION:
+        {
+            Separate();
+            ImGui::Indent();
+            origin = ImGui::GetCursorScreenPos();
+            auto admonition = ((MD_BLOCK_ADMONITION_DETAIL*)detail);
+            switch( admonition->type.text[0] )
+            {
+            case 'n':   // note
+                color = 0xFFEB6F1F;
+                TextColoredUnformatted( color, ICON_FA_CIRCLE_INFO "  " );
+                break;
+            case 't':   // tip
+                color = 0xFF368623;
+                TextColoredUnformatted( color, ICON_FA_LIGHTBULB "  " );
+                break;
+            case 'i':   // important
+                color = 0xFFE55789;
+                TextColoredUnformatted( color, ICON_FA_MESSAGE "  " );
+                break;
+            case 'w':   // warning
+                color = 0xFF036A9E;
+                TextColoredUnformatted( color, ICON_FA_TRIANGLE_EXCLAMATION "  " );
+                break;
+            case 'c':   // caution
+                color = 0xFF3336DA;
+                TextColoredUnformatted( color, ICON_FA_HAND "  " );
+                break;
+            default:
+                assert( false );
+            }
+            Glue();
+            break;
+        }
         default:
             break;
         }
@@ -194,6 +254,17 @@ public:
         case MD_BLOCK_TD:
             glue = false;
             break;
+        case MD_BLOCK_FOOTNOTE_DEF:
+            ImGui::PopFont();
+            break;
+        case MD_BLOCK_ADMONITION:
+        {
+            const auto scale = GetScale();
+            const auto pos = ImGui::GetCursorScreenPos();
+            ImGui::Unindent();
+            ImGui::GetWindowDrawList()->AddLineV( origin.x - 8.f * scale, origin.y, pos.y, color, 2.f * scale );
+            break;
+        }
         default:
             break;
         }
@@ -216,6 +287,14 @@ public:
         case MD_SPAN_DEL:
             strikethrough = true;
             break;
+        case MD_SPAN_FOOTNOTE_REF:
+        {
+            auto footnote = ((MD_SPAN_FOOTNOTE_REF_DETAIL*)detail);
+            ImGui::PushFont( g_fonts.normal, FontSmall );
+            Glue();
+            PrintTextExt( footnote->label.text, footnote->label.text + footnote->label.size );
+            break;
+        }
         default:
             break;
         }
@@ -246,17 +325,6 @@ public:
 
     int Text( MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size )
     {
-        constexpr std::array FontSizes = {
-            1.f,
-            1.7f,
-            1.6f,
-            1.5f,
-            1.4f,
-            1.3f,
-            1.2f,
-            1.1f
-        };
-
         switch( type )
         {
         case MD_TEXT_NORMAL:
@@ -364,15 +432,52 @@ private:
         }
     }
 
+    static void ExtractLine( const std::string& str, uint32_t& lineStart, uint32_t& lineEnd )
+    {
+        constexpr auto Parse = []( const char* str ) -> uint32_t {
+            if( *str == 0 || *str == '-' || *str == '+' ) return 0;
+            char* endptr;
+            const auto val = strtoul( str, &endptr, 10 );
+            if( endptr == str || *endptr != 0 ) return 0;
+            return uint32_t( val );
+        };
+
+        auto first = str.find_first_not_of( " \t" );
+        if( first == std::string::npos ) return;
+        auto last = str.find_last_not_of( " \t" );
+        const auto trimmed = str.substr( first, last - first + 1 );
+
+        const auto dash = trimmed.find( '-' );
+        if( dash == std::string::npos )
+        {
+            lineStart = Parse( trimmed.c_str() );
+            lineEnd = lineStart;
+            return;
+        }
+
+        auto startStr = trimmed.substr( 0, dash );
+        auto endStr = trimmed.substr( dash + 1 );
+        auto sf = startStr.find_first_not_of( " \t" );
+        auto ef = endStr.find_first_not_of( " \t" );
+        if( sf == std::string::npos || ef == std::string::npos ) return;
+        auto se = startStr.find_last_not_of( " \t" );
+        auto ee = endStr.find_last_not_of( " \t" );
+        lineStart = Parse( startStr.substr( sf, se - sf + 1 ).c_str() );
+        lineEnd = Parse( endStr.substr( ef, ee - ef + 1 ).c_str() );
+        if( lineStart == 0 || lineEnd == 0 ) lineStart = lineEnd = 0;
+    }
+
     void LinkHover()
     {
         const auto isSource = link.starts_with( "source:" ) && m_view && m_worker;
         const auto isAnchor = link.starts_with( "#" ) && m_view;
         StringIdx idx;
-        uint32_t line = 0;
+        uint32_t lineStart = 0;
+        uint32_t lineEnd = 0;
 
         ImGui::SetMouseCursor( ImGuiMouseCursor_Hand );
         ImGui::BeginTooltip();
+        ImGui::PushFont( g_fonts.normal, FontNormal );
         ImGui::PushStyleColor( ImGuiCol_Text, ImVec4( 1.f, 1.f, 1.f, 1.f ) );
         if( isSource )
         {
@@ -388,9 +493,17 @@ private:
             TextFocused( "Source:", fn.c_str() );
             if( separator != std::string::npos )
             {
-                line = atoi( source.substr( separator + 1 ).c_str() );
-                ImGui::SameLine( 0, 0 );
-                ImGui::Text( ":%i", line );
+                ExtractLine( source.substr( separator + 1 ), lineStart, lineEnd );
+                if( lineStart != 0 )
+                {
+                    ImGui::SameLine( 0, 0 );
+                    ImGui::Text( ":%i", lineStart );
+                    if( lineEnd != lineStart )
+                    {
+                        ImGui::SameLine( 0, 0 );
+                        ImGui::Text( "-%i", lineEnd );
+                    }
+                }
             }
 
             if( idx.Active() )
@@ -398,7 +511,7 @@ private:
                 ImGui::Dummy( ImVec2( 0, ImGui::GetTextLineHeight() * 0.25f ) );
                 ImGui::Separator();
                 ImGui::Dummy( ImVec2( 0, ImGui::GetTextLineHeight() * 0.25f ) );
-                m_view->DrawSourceTooltip( fn.c_str(), line, 3, 3, false );
+                m_view->DrawSourceTooltip( m_worker->GetString( idx ), lineStart, lineEnd, 3, 3, false );
             }
             else
             {
@@ -430,6 +543,7 @@ private:
             ImGui::TextUnformatted( link.c_str() );
         }
         ImGui::PopStyleColor();
+        ImGui::PopFont();
         ImGui::EndTooltip();
         if( IsMouseClicked( ImGuiMouseButton_Left ) )
         {
@@ -438,7 +552,7 @@ private:
                 if( idx.Active() )
                 {
                     auto str = m_worker->GetString( idx );
-                    m_view->ViewSymbolSource( str, line );
+                    m_view->ViewSymbolSource( str, lineStart );
                 }
             }
             else if( isAnchor )
@@ -465,6 +579,9 @@ private:
 
     int idx = 0;
 
+    uint32_t color;
+    ImVec2 origin;
+
     std::vector<List> lists;
     std::string link;
 
@@ -479,7 +596,7 @@ Markdown::Markdown( View* view, Worker* worker )
     , m_worker( worker )
 {
     memset( m_parser, 0, sizeof( MD_PARSER ) );
-    m_parser->flags = MD_FLAG_COLLAPSEWHITESPACE | MD_FLAG_PERMISSIVEAUTOLINKS | MD_FLAG_NOHTML | MD_FLAG_TABLES | MD_FLAG_TASKLISTS | MD_FLAG_STRIKETHROUGH;
+    m_parser->flags = MD_FLAG_COLLAPSEWHITESPACE | MD_FLAG_PERMISSIVEAUTOLINKS | MD_FLAG_NOHTML | MD_FLAG_TABLES | MD_FLAG_TASKLISTS | MD_FLAG_STRIKETHROUGH | MD_FLAG_FOOTNOTES | MD_FLAG_ADMONITIONS;
     m_parser->enter_block = []( MD_BLOCKTYPE type, void* detail, void* ud ) -> int { return ((MarkdownContext*)ud)->EnterBlock( type, detail ); };
     m_parser->leave_block = []( MD_BLOCKTYPE type, void* detail, void* ud ) -> int { return ((MarkdownContext*)ud)->LeaveBlock( type, detail ); };
     m_parser->enter_span = []( MD_SPANTYPE type, void* detail, void* ud ) -> int { return ((MarkdownContext*)ud)->EnterSpan( type, detail ); };

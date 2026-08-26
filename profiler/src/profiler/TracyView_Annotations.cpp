@@ -1,4 +1,7 @@
+#include <string.h>
+
 #include "TracyImGui.hpp"
+#include "TracyNameGen.hpp"
 #include "TracyPrint.hpp"
 #include "TracyView.hpp"
 #include "tracy_pdqsort.h"
@@ -9,7 +12,8 @@ namespace tracy
 
 void View::AddAnnotation( int64_t start, int64_t end )
 {
-    auto ann = std::make_unique<Annotation>();
+    auto ann = std::make_shared<Annotation>();
+    ann->text = GenerateAbstractName();
     ann->range.active = true;
     ann->range.min = start;
     ann->range.max = end;
@@ -26,6 +30,8 @@ void View::DrawSelectedAnnotation()
     ImGui::Begin( "Annotation", &show, ImGuiWindowFlags_AlwaysAutoResize );
     if( !ImGui::GetCurrentWindowRead()->SkipItems )
     {
+        ImGui::Checkbox( "Visible", &m_selectedAnnotation->visible );
+        ImGui::SameLine();
         if( ImGui::Button( ICON_FA_MICROSCOPE " Zoom to annotation" ) )
         {
             ZoomToRange( m_selectedAnnotation->range.min, m_selectedAnnotation->range.max );
@@ -52,7 +58,22 @@ void View::DrawSelectedAnnotation()
             char buf[1024];
             buf[descsz] = '\0';
             memcpy( buf, desc, descsz );
-            if( ImGui::InputTextWithHint( "##anndesc", "Describe annotation", buf, 256 ) )
+
+            const char* buttonText = ICON_FA_DICE;
+            auto buttonSize = ImGui::CalcTextSize( buttonText );
+            buttonSize.x += ImGui::GetStyle().FramePadding.x * 2.0f + ImGui::GetStyle().ItemSpacing.x;
+            ImGui::SetNextItemWidth( ImGui::GetContentRegionAvail().x - buttonSize.x );
+            bool changed = ImGui::InputTextWithHint( "##anndesc", "Describe annotation", buf, 256 );
+            ImGui::SameLine();
+            if( ImGui::Button( buttonText ) )
+            {
+                changed = true;
+                const auto name = GenerateAbstractName();
+                const auto len = std::min( sizeof( buf ) - 1, name.size() );
+                memcpy( buf, name.c_str(), len );
+                buf[len] = '\0';
+            }
+            if( changed )
             {
                 m_selectedAnnotation->text.assign( buf );
             }
@@ -76,7 +97,7 @@ void View::DrawAnnotationList()
     ImGui::Begin( "Annotation list", &m_showAnnotationList );
     if( ImGui::GetCurrentWindowRead()->SkipItems ) { ImGui::End(); return; }
 
-    if( ImGui::Button( ICON_FA_PLUS " Add annotation" ) )
+    if( ImGui::Button( ICON_FA_NOTE_STICKY " Add annotation" ) )
     {
         AddAnnotation( m_vd.zvStart, m_vd.zvEnd );
     }
@@ -108,6 +129,8 @@ void View::DrawAnnotationList()
     for( auto& ann : m_annotations )
     {
         ImGui::PushID( idx );
+        ImGui::Checkbox( "##visible", &ann->visible );
+        ImGui::SameLine();
         if( ImGui::Button( ICON_FA_PEN_TO_SQUARE ) )
         {
             m_selectedAnnotation = ann.get();
@@ -124,7 +147,7 @@ void View::DrawAnnotationList()
         }
         if( !ctrl ) TooltipIfHovered( "Press ctrl key to enable removal" );
         ImGui::SameLine();
-        ImGui::ColorButton( "c", ImGui::ColorConvertU32ToFloat4( ann->color ), ImGuiColorEditFlags_NoTooltip );
+        ImGui::ColorButton( "c", ImGui::ColorConvertU32ToFloat4( ann->color | 0xFF000000 ), ImGuiColorEditFlags_NoTooltip );
         ImGui::SameLine();
         if( m_selectedAnnotation == ann.get() )
         {

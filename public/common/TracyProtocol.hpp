@@ -10,7 +10,9 @@ namespace tracy
 
 constexpr unsigned Lz4CompressBound( unsigned isize ) { return isize + ( isize / 255 ) + 16; }
 
-constexpr uint32_t ProtocolVersion = 79;
+// 83 = upstream v0.14.1's 82 + the TT GpuZone/marker queue items (the fork previously shipped them
+// as 79 on the 0.13 base; a number above upstream's keeps the fork stream unambiguous either way).
+constexpr uint32_t ProtocolVersion = 83;
 constexpr uint16_t BroadcastVersion = 3;
 
 using lz4sz_t = uint32_t;
@@ -155,6 +157,7 @@ struct BroadcastMessage_v0
 
 #pragma pack( pop )
 
+constexpr uint64_t ProtocolOffset8Bit  = (1ull << 8);
 constexpr uint64_t ProtocolOffset16Bit = (1ull << 16);
 constexpr uint64_t ProtocolOffset32Bit = (1ull << 16) + (1ull << 32);
 

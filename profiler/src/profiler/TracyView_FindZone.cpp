@@ -17,7 +17,6 @@ namespace tracy
 
 extern double s_time;
 
-#ifndef TRACY_NO_STATISTICS
 void View::FindZones()
 {
     m_findZone.hasResults = true;
@@ -37,7 +36,6 @@ void View::FindZones()
         }
     }
 }
-#endif
 
 uint64_t View::GetSelectionTarget( const Worker::ZoneThreadData& ev, FindZone::GroupBy groupBy ) const
 {
@@ -132,9 +130,8 @@ void View::DrawZoneList( int id, const Vector<short_ptr<ZoneEvent>>& zones )
                         const auto ctx0 = m_worker.GetContextSwitchData( GetZoneThread( *lhs ) );
                         const auto ctx1 = m_worker.GetContextSwitchData( GetZoneThread( *rhs ) );
                         int64_t t0, t1;
-                        uint64_t c0, c1;
-                        GetZoneRunningTime( ctx0, *lhs, t0, c0 );
-                        GetZoneRunningTime( ctx1, *rhs, t1, c1 );
+                        GetZoneRunningTime( ctx0, *lhs, t0 );
+                        GetZoneRunningTime( ctx1, *rhs, t1 );
                         return t0 > t1;
                         } );
                 }
@@ -144,9 +141,8 @@ void View::DrawZoneList( int id, const Vector<short_ptr<ZoneEvent>>& zones )
                         const auto ctx0 = m_worker.GetContextSwitchData( GetZoneThread( *lhs ) );
                         const auto ctx1 = m_worker.GetContextSwitchData( GetZoneThread( *rhs ) );
                         int64_t t0, t1;
-                        uint64_t c0, c1;
-                        GetZoneRunningTime( ctx0, *lhs, t0, c0 );
-                        GetZoneRunningTime( ctx1, *rhs, t1, c1 );
+                        GetZoneRunningTime( ctx0, *lhs, t0 );
+                        GetZoneRunningTime( ctx1, *rhs, t1 );
                         return t0 < t1;
                         } );
                 }
@@ -208,8 +204,7 @@ void View::DrawZoneList( int id, const Vector<short_ptr<ZoneEvent>>& zones )
             if( m_findZone.runningTime )
             {
                 const auto ctx = m_worker.GetContextSwitchData( GetZoneThread( *ev ) );
-                uint64_t cnt;
-                GetZoneRunningTime( ctx, *ev, timespan, cnt );
+                GetZoneRunningTime( ctx, *ev, timespan );
             }
             else
             {
@@ -226,7 +221,7 @@ void View::DrawZoneList( int id, const Vector<short_ptr<ZoneEvent>>& zones )
             if( ImGui::IsItemHovered() )
             {
                 m_zoneHighlight = ev;
-                if( IsMouseClicked( 2 ) )
+                if( IsMouseClicked( ImGuiMouseButton_Middle ) )
                 {
                     ZoomToZone( *ev );
                 }
@@ -259,12 +254,9 @@ void View::DrawFindZone()
 
     const auto scale = GetScale();
     ImGui::SetNextWindowSize( ImVec2( 520 * scale, 800 * scale ), ImGuiCond_FirstUseEver );
+    m_findZoneConstraint.Constrain();
     ImGui::Begin( "Find zone", &m_findZone.show, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse );
     if( ImGui::GetCurrentWindowRead()->SkipItems ) { ImGui::End(); return; }
-#ifdef TRACY_NO_STATISTICS
-    ImGui::TextWrapped( "Collection of statistical data is disabled in this build." );
-    ImGui::TextWrapped( "Rebuild without the TRACY_NO_STATISTICS macro to enable zone search." );
-#else
     if( m_worker.GetGpuZoneCount() > 0 )
     {
         ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 0, 0 ) );
@@ -356,6 +348,7 @@ void View::DrawFindZone()
         ImGui::SameLine();
         ToggleButton( ICON_FA_RULER " Limits", m_showRanges );
     }
+    m_findZoneConstraint.MarkMinWidth();
 
     if( m_findZone.rangeSlim != m_findZone.range )
     {
@@ -425,7 +418,7 @@ void View::DrawFindZone()
                 ImGui::TextColored( ImVec4( 0.5, 0.5, 0.5, 1 ), "(%s) %s", RealToString( zones.size() ), LocationToString( fileName, srcloc.line ) );
                 if( ImGui::IsItemHovered() )
                 {
-                    DrawSourceTooltip( fileName, srcloc.line );
+                    DrawSourceTooltip( fileName, srcloc.line, srcloc.line );
                     if( ImGui::IsItemClicked( 1 ) )
                     {
                         if( SourceFileValid( fileName, m_worker.GetCaptureTime(), *this, m_worker ) )
@@ -484,8 +477,7 @@ void View::DrawFindZone()
                             const auto ctx = m_worker.GetContextSwitchData( m_worker.DecompressThread( zones[i].Thread() ) );
                             if( !ctx ) break;
                             int64_t t;
-                            uint64_t cnt;
-                            if( !GetZoneRunningTime( ctx, zone, t, cnt ) ) break;
+                            if( !GetZoneRunningTime( ctx, zone, t ) ) break;
                             vec.push_back_no_space_check( t );
                             total += t;
                             if( t < tmin ) tmin = t;
@@ -500,8 +492,7 @@ void View::DrawFindZone()
                             const auto ctx = m_worker.GetContextSwitchData( m_worker.DecompressThread( zones[i].Thread() ) );
                             if( !ctx ) break;
                             int64_t t;
-                            uint64_t cnt;
-                            if( !GetZoneRunningTime( ctx, zone, t, cnt ) ) break;
+                            if( !GetZoneRunningTime( ctx, zone, t ) ) break;
                             vec.push_back_no_space_check( t );
                             total += t;
                             if( t < tmin ) tmin = t;
@@ -578,12 +569,13 @@ void View::DrawFindZone()
                 const auto vsz = vec.size();
                 if( vsz != 0 )
                 {
+                    auto Percentile = [&vec, vsz]( double p ) { return vec[std::min<size_t>( vsz - 1, p * vsz )]; };
                     m_findZone.average = float( total ) / vsz;
-                    m_findZone.median = vec[vsz/2];
-                    m_findZone.p75 = vec[3 * (vsz / 4)];
-                    m_findZone.p90 = vec[vsz / 10 * 9];
-                    m_findZone.p99 = vec[size_t(float(vsz * 0.99))];
-                    m_findZone.p99_9 = vec[size_t(float(vsz * 0.999))];
+                    m_findZone.median = Percentile( 0.5 );
+                    m_findZone.p75    = Percentile( 0.75 );
+                    m_findZone.p90    = Percentile( 0.9 );
+                    m_findZone.p99    = Percentile( 0.99 );
+                    m_findZone.p99_9  = Percentile( 0.999 );
                     m_findZone.total = total;
                     m_findZone.sortedNum = i;
                     m_findZone.tmin = tmin;
@@ -615,8 +607,7 @@ void View::DrawFindZone()
                                 {
                                     const auto ctx = m_worker.GetContextSwitchData( m_worker.DecompressThread( zones[i].Thread() ) );
                                     int64_t t;
-                                    uint64_t cnt;
-                                    GetZoneRunningTime( ctx, *ev.Zone(), t, cnt );
+                                    GetZoneRunningTime( ctx, *ev.Zone(), t );
                                     vec.push_back_no_space_check( t );
                                     act++;
                                     total += t;
@@ -633,8 +624,7 @@ void View::DrawFindZone()
                                 {
                                     const auto ctx = m_worker.GetContextSwitchData( m_worker.DecompressThread( zones[i].Thread() ) );
                                     int64_t t;
-                                    uint64_t cnt;
-                                    GetZoneRunningTime( ctx, *ev.Zone(), t, cnt );
+                                    GetZoneRunningTime( ctx, *ev.Zone(), t );
                                     vec.push_back_no_space_check( t );
                                     act++;
                                     total += t;
@@ -894,6 +884,7 @@ void View::DrawFindZone()
                         m_findZone.scheduleResetMatch = true;
                     }
                 }
+                m_findZoneConstraint.MarkMinWidth();
 
                 const auto cumulateTime = m_findZone.cumulateTime;
 
@@ -1152,7 +1143,7 @@ void View::DrawFindZone()
                         {
                             const auto sz = m_findZone.sorted.size();
                             const auto avg = m_findZone.average;
-                            const auto ss = zoneData.sumSq - 2. * zoneData.total * avg + avg * avg * sz;
+                            const auto ss = zoneData.sumSq - 2. * zoneData.total * avg + double( avg ) * avg * sz;
                             const auto sd = sqrt( ss / ( sz - 1 ) );
 
                             ImGui::SameLine();
@@ -1160,7 +1151,11 @@ void View::DrawFindZone()
                             ImGui::SameLine();
                             TextFocused( "\xcf\x83:", TimeToString( sd ) );
                             TooltipIfHovered( "Standard deviation" );
+                            ImGui::SameLine();
+                            ImGui::TextDisabled( "(%.2f%%)", 100.f * sd / avg );
+                            TooltipIfHovered( "Coefficient of variation" );
                         }
+                        m_findZoneConstraint.MarkMinWidth();
                         TextFocused( "P75:", TimeToString( m_findZone.p75 ) );
                         ImGui::SameLine();
                         ImGui::Spacing();
@@ -1490,12 +1485,12 @@ void View::DrawFindZone()
                             TextFocused( "Time spent in the right bins:", TimeToString( tAfter ) );
                             ImGui::EndTooltip();
 
-                            if( IsMouseClicked( 1 ) )
+                            if( IsMouseClicked( ImGuiMouseButton_Right ) )
                             {
                                 m_findZone.highlight.active = false;
                                 m_findZone.ResetGroups();
                             }
-                            else if( IsMouseClicked( 0 ) )
+                            else if( IsMouseClicked( ImGuiMouseButton_Left ) )
                             {
                                 m_findZone.highlight.active = true;
                                 m_findZone.highlight.start = t0;
@@ -1503,7 +1498,7 @@ void View::DrawFindZone()
                                 m_findZone.hlOrig_t0 = t0;
                                 m_findZone.hlOrig_t1 = t1;
                             }
-                            else if( IsMouseDragging( 0 ) )
+                            else if( IsMouseDragging( ImGuiMouseButton_Left ) )
                             {
                                 if( t0 < m_findZone.hlOrig_t0 )
                                 {
@@ -1627,6 +1622,7 @@ void View::DrawFindZone()
             m_findZone.selGroup = m_findZone.Unselected;
             m_findZone.ResetGroups();
         }
+        m_findZoneConstraint.MarkMinWidth();
 
         ImGui::TextUnformatted( "Sort by:" );
         ImGui::SameLine();
@@ -1692,8 +1688,7 @@ void View::DrawFindZone()
                 const auto ctx = m_worker.GetContextSwitchData( m_worker.DecompressThread( ev.Thread() ) );
                 if( !ctx ) break;
                 int64_t t;
-                uint64_t cnt;
-                if( !GetZoneRunningTime( ctx, *ev.Zone(), t, cnt ) ) break;
+                if( !GetZoneRunningTime( ctx, *ev.Zone(), t ) ) break;
                 timespan = t;
             }
 
@@ -2030,7 +2025,7 @@ void View::DrawFindZone()
             }
         }
 
-        if( m_findZone.samples.enabled && m_findZone.samples.scheduleUpdate && !m_findZone.scheduleResetMatch )
+        if( m_findZone.samples.enabled && m_findZone.samples.scheduleUpdate && !m_findZone.scheduleResetMatch && m_worker.AreSymbolSamplesReady() )
         {
             m_findZone.samples.scheduleUpdate = false;
 
@@ -2154,6 +2149,7 @@ void View::DrawFindZone()
                 {
                     m_findZone.samples.scheduleUpdate = true;
                 }
+                m_findZoneConstraint.MarkMinWidth();
             }
 
             if( !m_findZone.samples.enabled )
@@ -2165,9 +2161,14 @@ void View::DrawFindZone()
 
             Vector<SymList> data;
             data.reserve( m_findZone.samples.counts.size() );
-            for( auto it: m_findZone.samples.counts ) data.push_back_no_space_check( it );
+            uint64_t totalSamples = 0;
+            for( auto it: m_findZone.samples.counts )
+            {
+                data.push_back_no_space_check( it );
+                totalSamples += it.excl;
+            }
             int64_t timeRange = ( m_findZone.selGroup != m_findZone.Unselected ) ? m_findZone.selTotal : m_findZone.total;
-            DrawSamplesStatistics( data, timeRange, AccumulationMode::SelfOnly );
+            DrawSamplesStatistics( data, timeRange, totalSamples, AccumulationMode::SelfOnly );
 
             ImGui::TreePop();
         }
@@ -2189,8 +2190,6 @@ void View::DrawFindZone()
         }
     }
     ImGui::EndChild();
-#endif
-
     ImGui::End();
 }
 

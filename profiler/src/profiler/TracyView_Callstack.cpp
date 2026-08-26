@@ -21,25 +21,39 @@ void View::DrawCallstackWindow()
     bool show = true;
     const auto scale = GetScale();
     ImGui::SetNextWindowSize( ImVec2( 1400 * scale, 500 * scale ), ImGuiCond_FirstUseEver );
+    m_callstackConstraint.Constrain();
     ImGui::Begin( "Call stack", &show, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse );
     if( !ImGui::GetCurrentWindowRead()->SkipItems )
     {
-        DrawCallstackTable( m_callstackView.id, m_callstackView.thread, true, true );
+        DrawCallstackTable( m_callstackView.id, {
+            .thread = m_callstackView.thread,
+            .wait = m_callstackView.wait,
+            .entryStacks = true,
+            .showThread = true,
+            .constraints = &m_callstackConstraint
+        } );
     }
     ImGui::End();
     if( !show ) m_callstackView = {};
 }
 
-void View::DrawCallstackTable( uint32_t callstack, uint64_t thread, bool globalEntriesButton, bool showThread )
+void View::DrawCallstackTable( uint32_t callstack, const CallstackTableParams& params )
 {
     auto& crash = m_worker.GetCrashEvent();
-    const bool hasCrashed = crash.thread != 0 && crash.callstack == callstack;
-
     auto& cs = m_worker.GetCallstack( callstack );
-    DrawCallstackTable( cs.data(), cs.size(), thread, globalEntriesButton, showThread, hasCrashed, callstack );
+
+    DrawCallstackTable( cs.data(), cs.size(), {
+        .thread = params.thread,
+        .wait = params.wait,
+        .entryStacks = params.entryStacks,
+        .showThread = params.showThread,
+        .hasCrashed = crash.thread != 0 && crash.callstack == callstack,
+        .callstack = callstack,
+        .constraints = params.constraints
+    } );
 }
 
-void View::DrawCallstackTable( const CallstackFrameId* data, size_t size, uint64_t thread, bool globalEntriesButton, bool showThread, bool hasCrashed, int64_t callstack )
+void View::DrawCallstackTable( const CallstackFrameId* data, size_t size, const CallstackTableParams& params )
 {
     if( ClipboardButton() )
     {
@@ -113,9 +127,9 @@ void View::DrawCallstackTable( const CallstackFrameId* data, size_t size, uint64
     }
     if( s_config.llm )
     {
-        auto Attach = [this, data, size, hasCrashed, thread, callstack]() {
+        auto Attach = [this, data, size, &params]() {
             auto json = GetCallstackJson( data, size );
-            if( hasCrashed )
+            if( params.hasCrashed )
             {
                 auto& crash = m_worker.GetCrashEvent();
                 json["crashed"] = true;
@@ -126,11 +140,19 @@ void View::DrawCallstackTable( const CallstackFrameId* data, size_t size, uint64
             }
             else
             {
-                auto threadName = m_worker.GetThreadName( thread );
+                auto threadName = m_worker.GetThreadName( params.thread );
                 if( strcmp( threadName, "???" ) != 0 ) json["thread_name"] = threadName;
-                json["thread_id"] = thread;
+                json["thread_id"] = params.thread;
             }
-            if( callstack >= 0 ) json["id"] = callstack;
+            if( params.callstack >= 0 ) json["id"] = params.callstack;
+            if( params.wait.time > 0 )
+            {
+                json["wait_time"] = TimeToString( params.wait.time );
+                if( params.wait.reasonCode ) json["wait_reason"] = params.wait.reasonCode;
+                if( params.wait.reason ) json["wait_reason_hint"] = params.wait.reason;
+                if( params.wait.stateCode ) json["wait_state"] = params.wait.stateCode;
+                if( params.wait.state ) json["wait_state_hint"] = params.wait.state;
+            }
 
             AddLlmAttachment( json );
         };
@@ -146,7 +168,7 @@ void View::DrawCallstackTable( const CallstackFrameId* data, size_t size, uint64
         }
         if( ImGui::BeginPopup( "##callstackllm" ) )
         {
-            if( hasCrashed && ImGui::Selectable( "How to fix this crash?" ) )
+            if( params.hasCrashed && ImGui::Selectable( "How to fix this crash?" ) )
             {
                 Attach();
                 AddLlmQuery( "How to fix this crash?" );
@@ -170,7 +192,14 @@ void View::DrawCallstackTable( const CallstackFrameId* data, size_t size, uint64
     ImGui::SameLine();
     ImGui::Spacing();
     ImGui::SameLine();
-    SmallCheckbox( ICON_FA_SHIELD_HALVED " External", &m_showExternalFrames );
+    if( params.wait.time != 0 )
+    {
+        SmallCheckbox( ICON_FA_SHIELD_HALVED " External", &m_showExternalFramesWaitStacks );
+    }
+    else
+    {
+        SmallCheckbox( ICON_FA_SHIELD_HALVED " External", &m_showExternalFrames );
+    }
     ImGui::SameLine();
     ImGui::Spacing();
     ImGui::SameLine();
@@ -184,26 +213,61 @@ void View::DrawCallstackTable( const CallstackFrameId* data, size_t size, uint64
     ImGui::SetNextItemWidth( ImGui::CalcTextSize( "Symbol address xxx" ).x );
     ImGui::Combo( "##frameat", &m_showCallstackFrameAddress, "Source code\0Return address\0Symbol address\0Entry point\0" );
 
-    if( hasCrashed )
+    if( params.hasCrashed )
     {
         ImGui::SameLine();
         ImGui::Spacing();
         ImGui::SameLine();
         TextColoredUnformatted( ImVec4( 1.f, 0.2f, 0.2f, 1.f ), ICON_FA_SKULL " Crash" );
+        if( ImGui::IsItemHovered() )
+        {
+            CrashTooltip();
+            if( ImGui::IsItemClicked() )
+            {
+                auto& crash = m_worker.GetCrashEvent();
+                CenterAtTime( crash.time );
+            }
+        }
     }
 
-    if( globalEntriesButton && m_worker.AreCallstackSamplesReady() )
+    if( params.wait.time != 0 )
+    {
+        ImGui::SameLine();
+        ImGui::Spacing();
+        ImGui::SameLine();
+        TextColoredUnformatted( ImVec4( 0.6f, 0.6f, 1.f, 1.f ), ICON_FA_HOURGLASS_HALF " Wait stack" );
+        if( params.wait.time > 0 && ImGui::IsItemHovered() )
+        {
+            ImGui::BeginTooltip();
+            TextFocused( "Time:", TimeToString( params.wait.time ) );
+            if( params.wait.reasonCode )
+            {
+                TextFocused( "Reason:", params.wait.reasonCode );
+                ImGui::SameLine();
+                TextDisabledUnformatted( params.wait.reason );
+            }
+            if( params.wait.stateCode )
+            {
+                TextFocused( "State:", params.wait.stateCode );
+                ImGui::SameLine();
+                TextDisabledUnformatted( params.wait.state );
+            }
+            ImGui::EndTooltip();
+        }
+    }
+
+    if( params.entryStacks && m_worker.AreCallstackSamplesReady() )
     {
         auto frame = m_worker.GetCallstackFrame( *data );
         if( frame && frame->data[0].symAddr != 0 )
         {
             auto sym = m_worker.GetSymbolStats( frame->data[0].symAddr );
-            if( sym && !sym->parents.empty() )
+            if( sym && !sym->wasReached.empty() )
             {
                 ImGui::SameLine();
                 ImGui::Spacing();
                 ImGui::SameLine();
-                if( ImGui::Button( ICON_FA_DOOR_OPEN " Entry stacks" ) )
+                if( ImGui::Button( ICON_FA_ARROW_DOWN_SHORT_WIDE " Entry stacks" ) )
                 {
                     ShowSampleParents( frame->data[0].symAddr, true );
                 }
@@ -214,13 +278,13 @@ void View::DrawCallstackTable( const CallstackFrameId* data, size_t size, uint64
 
 #ifndef __EMSCRIPTEN__
     bool clicked = false;
-    if( s_config.llm && callstack >= 0 )
+    if( s_config.llm && params.callstack >= 0 )
     {
         bool force = false;
         if( s_config.llmAnnotateCallstacks )
         {
             std::lock_guard lock( m_callstackDescLock );
-            auto it = m_callstackDesc.find( callstack );
+            auto it = m_callstackDesc.find( params.callstack );
             if( it == m_callstackDesc.end() ) force = true;
         }
         ImGui::SameLine();
@@ -240,7 +304,7 @@ void View::DrawCallstackTable( const CallstackFrameId* data, size_t size, uint64
                 }
             };
 
-            m_llm.QueueFastMessageLocking( req, [this, callstack] (nlohmann::json res) {
+            m_llm.QueueFastMessageLocking( req, [this, callstack = params.callstack] (nlohmann::json res) {
                 if( res.contains( "choices" ) )
                 {
                     auto& choices = res["choices"];
@@ -303,7 +367,7 @@ void View::DrawCallstackTable( const CallstackFrameId* data, size_t size, uint64
     }
 #endif
 
-    if( showThread && thread != 0 )
+    if( params.showThread && params.thread != 0 )
     {
         ImGui::SameLine();
         ImGui::Spacing();
@@ -315,23 +379,24 @@ void View::DrawCallstackTable( const CallstackFrameId* data, size_t size, uint64
         ImGui::Spacing();
         ImGui::SameLine();
 
-        SmallColorBox( GetThreadColor( thread, 0 ) );
+        SmallColorBox( GetThreadColor( params.thread, 0 ) );
         ImGui::SameLine();
-        TextFocused( "Thread:", m_worker.GetThreadName( thread ) );
+        TextFocused( "Thread:", m_worker.GetThreadName( params.thread ) );
         ImGui::SameLine();
-        ImGui::TextDisabled( "(%s)", RealToString( thread ) );
-        if( m_worker.IsThreadFiber( thread ) )
+        ImGui::TextDisabled( "(%s)", RealToString( params.thread ) );
+        if( m_worker.IsThreadFiber( params.thread ) )
         {
             ImGui::SameLine();
             TextColoredUnformatted( ImVec4( 0.2f, 0.6f, 0.2f, 1.f ), "Fiber" );
         }
     }
+    if( params.constraints ) params.constraints->MarkMinWidth();
 
 #ifndef __EMSCRIPTEN__
-    if( s_config.llm && callstack >= 0 )
+    if( s_config.llm && params.callstack >= 0 )
     {
         std::lock_guard lock( m_callstackDescLock );
-        auto it = m_callstackDesc.find( callstack );
+        auto it = m_callstackDesc.find( params.callstack );
         if( it != m_callstackDesc.end() )
         {
             TextDisabledUnformatted( ICON_FA_HAND_POINT_RIGHT );
@@ -352,7 +417,7 @@ void View::DrawCallstackTable( const CallstackFrameId* data, size_t size, uint64
         }
         else if( clicked )
         {
-            m_callstackDesc.emplace( callstack, "…" );
+            m_callstackDesc.emplace( params.callstack, "…" );
         }
     }
 #endif
@@ -367,6 +432,8 @@ void View::DrawCallstackTable( const CallstackFrameId* data, size_t size, uint64
         ImGui::TableSetupColumn( "Image" );
         ImGui::TableHeadersRow();
 
+        const bool showExternal = params.wait.time != 0 ? m_showExternalFramesWaitStacks : m_showExternalFrames;
+
         int external = 0;
         int fidx = 0;
         int bidx = 0;
@@ -376,7 +443,7 @@ void View::DrawCallstackTable( const CallstackFrameId* data, size_t size, uint64
             auto frameData = m_worker.GetCallstackFrame( entry );
             if( !frameData )
             {
-                if( !m_showExternalFrames )
+                if( !showExternal )
                 {
                     external++;
                     continue;
@@ -420,7 +487,7 @@ void View::DrawCallstackTable( const CallstackFrameId* data, size_t size, uint64
                     const bool isExternal = m_worker.IsFrameExternal( frame.file, frameData->imageName );
                     if( isExternal )
                     {
-                        if( !m_showExternalFrames )
+                        if( !showExternal )
                         {
                             if( f == fsz-1 ) fidx++;
                             external++;
@@ -581,12 +648,12 @@ void View::DrawCallstackTable( const CallstackFrameId* data, size_t size, uint64
                             if( sym )
                             {
                                 const auto symtxt = m_worker.GetString( sym->file );
-                                DrawSourceTooltip( symtxt, sym->line );
+                                DrawSourceTooltip( symtxt, sym->line, sym->line );
                             }
                         }
                         else
                         {
-                            DrawSourceTooltip( filename, frame.line );
+                            DrawSourceTooltip( filename, frame.line, frame.line );
                         }
                         if( ImGui::IsItemClicked( 1 ) )
                         {
@@ -624,25 +691,11 @@ void View::DrawCallstackTable( const CallstackFrameId* data, size_t size, uint64
                     if( frameData->imageName.Active() )
                     {
                         auto image = m_worker.GetString( frameData->imageName );
-                        const char* end = image + strlen( image );
-
-                        if( m_shortImageNames )
-                        {
-                            const char* ptr = end - 1;
-                            while( ptr > image && *ptr != '/' && *ptr != '\\' ) ptr--;
-                            if( *ptr == '/' || *ptr == '\\' ) ptr++;
-                            const auto cw = ImGui::GetContentRegionAvail().x;
-                            const auto tw = ImGui::CalcTextSize( image, end ).x;
-                            TextDisabledUnformatted( ptr );
-                            if( ptr != image || tw > cw ) TooltipIfHovered( image );
-                        }
-                        else
-                        {
-                            const auto cw = ImGui::GetContentRegionAvail().x;
-                            const auto tw = ImGui::CalcTextSize( image, end ).x;
-                            TextDisabledUnformatted( image );
-                            if( tw > cw ) TooltipIfHovered( image );
-                        }
+                        const char* ptr = m_shortImageNames ? ShortenImageName( image ) : image;
+                        const auto cw = ImGui::GetContentRegionAvail().x;
+                        const auto tw = ImGui::CalcTextSize( image ).x;
+                        TextDisabledUnformatted( ptr );
+                        if( ptr != image || tw > cw ) TooltipIfHovered( image );
                     }
                 }
             }

@@ -8,6 +8,8 @@
 #include "TracyFastVector.hpp"
 #include "TracyStringHelpers.hpp"
 #include "../common/TracyAlloc.hpp"
+#include "../common/TracyAssert.hpp"
+#include "../common/TracyString.hpp"
 #include "../common/TracySystem.hpp"
 
 
@@ -237,9 +239,18 @@ private:
         if( cache->ContainsImage( startAddress ) ) return 0;
 
         const uint32_t headerCount = info->dlpi_phnum;
-        assert( headerCount > 0);
-        const auto endAddress = static_cast<uint64_t>( info->dlpi_addr +
-            info->dlpi_phdr[info->dlpi_phnum - 1].p_vaddr + info->dlpi_phdr[info->dlpi_phnum - 1].p_memsz);
+        TRACY_ASSERT( headerCount > 0 );
+
+        // headers aren't guaranteed to be in address order; find the max
+        uint64_t endAddress = startAddress;
+        for( uint32_t i=0; i<headerCount; i++ )
+        {
+            const auto& phdr = info->dlpi_phdr[i];
+            if( phdr.p_type != PT_LOAD ) continue;
+
+            const auto phdrEnd = static_cast<uint64_t>( info->dlpi_addr + phdr.p_vaddr + phdr.p_memsz );
+            endAddress = std::max( phdrEnd, endAddress );
+        }
 
         ImageEntry image{};
         image.m_startAddress = startAddress;
@@ -311,7 +322,7 @@ static ImageCache* s_krnlCache;
 
 void CreateImageCaches()
 {
-    assert( s_imageCache == nullptr && s_krnlCache == nullptr );
+    TRACY_ASSERT( s_imageCache == nullptr && s_krnlCache == nullptr );
     s_imageCache = new ( tracy_malloc( sizeof( UserlandImageCache ) ) ) UserlandImageCache();
     s_krnlCache = new ( tracy_malloc( sizeof( ImageCache ) ) ) ImageCache();
 }
@@ -667,7 +678,7 @@ void DbgHelpInit()
         }
     }
 
-    assert( length < sizeof( buffer ) );
+    TRACY_ASSERT( length < sizeof( buffer ) );
     if( SetEnvironmentVariableA( "_NT_SYMBOL_PATH", buffer ) == FALSE ) SymError( "SetEnvironmentVariableA", GetLastError() );
  
     SymSetOptions( SymGetOptions() | SYMOPT_LOAD_LINES );
@@ -887,7 +898,7 @@ const char* DecodeCallstackPtrFast( uint64_t ptr )
 
 const char* GetKernelModulePath( uint64_t addr )
 {
-    assert( IsKernelAddress( addr ) );
+    TRACY_ASSERT( IsKernelAddress( addr ) );
     if( !s_krnlCache ) return nullptr;
     const ImageEntry* imageEntry = s_krnlCache->GetImageForAddress( addr );
     if( imageEntry ) return imageEntry->m_path;
@@ -918,7 +929,7 @@ ModuleNameAndBaseAddress GetModuleNameAndPrepareSymbols( uint64_t addr )
     constexpr DWORD flag = GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT;
     HMODULE mod = NULL;
 
-    InitRpmalloc();
+    InitAllocator();
     if( GetModuleHandleExA( flag, (char*)addr, &mod ) != 0 )
     {
         MODULEINFO info;
@@ -997,7 +1008,7 @@ CallstackEntryData DecodeCallstackPtr( uint64_t ptr )
     DBGHELP_LOCK;
 #endif
 
-    InitRpmalloc();
+    InitAllocator();
 
     const ModuleNameAndBaseAddress moduleNameAndAddress = GetModuleNameAndPrepareSymbols( ptr );
 
@@ -1156,7 +1167,11 @@ size_t s_kernelSymCnt;
 static void InitKernelSymbols()
 {
     FILE* f = fopen( "/proc/kallsyms", "rb" );
-    if( !f ) return;
+    if( !f )
+    {
+        TracyDebug( "Failed to read /proc/kallsyms, kernel symbols will be unavailable." );
+        return;
+    }
     tracy::FastVector<KernelSymbol> tmpSym( 512 * 1024 );
     size_t linelen = 16 * 1024;     // linelen must be big enough to prevent reallocs in getline()
     auto linebuf = (char*)tracy_malloc( linelen );
@@ -1185,9 +1200,9 @@ static void InitKernelSymbols()
             }
             else
             {
-                assert( false );
+                TRACY_ASSERT( false );
             }
-            assert( ( v & ~0xF ) == 0 );
+            TRACY_ASSERT( ( v & ~0xF ) == 0 );
             addr <<= 4;
             addr |= v;
             ptr++;
@@ -1247,7 +1262,7 @@ static void InitKernelSymbols()
     {
         if( v.name ) *dst++ = v;
     }
-    assert( dst == s_kernelSym + validCnt );
+    TRACY_ASSERT( dst == s_kernelSym + validCnt );
 
     TracyDebug( "Loaded %zu kernel symbols (%zu code sections)", tmpSym.size(), validCnt );
 }
@@ -1273,9 +1288,12 @@ char* NormalizePath( const char* path )
         case 2:
             if( memcmp( ptr, "..", 2 ) == 0 )
             {
-                const char* back = res + rsz - 1;
-                while( back > res && *back != '/' ) back--;
-                rsz = back - res;
+                if( rsz > 0 )
+                {
+                    const char* back = res + rsz - 1;
+                    while( back > res && *back != '/' ) back--;
+                    rsz = back - res;
+                }
                 ptr = next + 1;
                 continue;
             }
@@ -1314,7 +1332,7 @@ void InitCallstackCritical()
 
 void InitCallstack()
 {
-    InitRpmalloc();
+    InitAllocator();
 
 #ifdef TRACY_HAS_DL_ITERATE_PHDR_TO_REFRESH_IMAGE_CACHE
     CreateImageCaches();
@@ -1392,7 +1410,7 @@ int GetDebugInfoDescriptor( const char* buildid_data, size_t buildid_size, const
 
 const uint8_t* GetBuildIdForImage( const char* image, size_t& size )
 {
-    assert( image );
+    TRACY_ASSERT( image );
     for( auto& v : *s_di_known )
     {
         if( strcmp( image, v.filename ) == 0 )
@@ -1452,8 +1470,7 @@ static const char* DecodeCallstackPtrFastExternal( uint64_t ptr )
     }
     if( symname )
     {
-        strncpy( ret, symname, sizeof( ret ) - 1 );
-        ret[sizeof( ret ) - 1] = '\0';
+        strzcpy( ret, symname, sizeof( ret ) );
     }
     else
     {
@@ -1481,7 +1498,7 @@ const char* DecodeCallstackPtrFast( uint64_t ptr )
     }
     if( symname )
     {
-        strcpy( ret, symname );
+        strzcpy( ret, symname, sizeof( ret ) );
     }
     else
     {
@@ -1780,7 +1797,7 @@ CallstackEntryData DecodeCallstackPtrExternal( uint64_t ptr )
 
 CallstackEntryData DecodeCallstackPtr( uint64_t ptr )
 {
-    InitRpmalloc();
+    InitAllocator();
     if( !IsKernelAddress( ptr ) )
     {
 #ifdef __linux__
@@ -1815,7 +1832,7 @@ CallstackEntryData DecodeCallstackPtr( uint64_t ptr )
         {
             cb_num = 0;
             backtrace_pcinfo( cb_bts, ptr, CallstackDataCb, CallstackErrorCb, nullptr );
-            assert( cb_num > 0 );
+            TRACY_ASSERT( cb_num > 0 );
 
             backtrace_syminfo( cb_bts, ptr, SymInfoCallback, SymInfoError, nullptr );
         }
@@ -1874,7 +1891,7 @@ const char* DecodeCallstackPtrFast( uint64_t ptr )
     }
     if( symname )
     {
-        strcpy( ret, symname );
+        strzcpy( ret, symname, sizeof( ret ) );
     }
     else
     {
