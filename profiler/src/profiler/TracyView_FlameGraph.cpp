@@ -144,14 +144,13 @@ void View::BuildFlameGraph( const Worker& worker, std::vector<FlameGraphItem>& d
             if( !v.IsEndValid() ) break;
             const auto srcloc = v.SrcLoc();
             int64_t duration;
-            uint64_t cnt;
             if ( m_flameRange.active )
             {
-                if( !GetZoneRunningTime( ctx, v, m_flameGraphInvariant.range, duration, cnt ) ) continue;
+                if( !GetZoneRunningTime( ctx, v, m_flameGraphInvariant.range, duration ) ) continue;
             }
             else
             {
-                if( !GetZoneRunningTime( ctx, v, duration, cnt ) ) break;
+                if( !GetZoneRunningTime( ctx, v, duration ) ) break;
             }
 
             if( srcloc == last )
@@ -197,14 +196,13 @@ void View::BuildFlameGraph( const Worker& worker, std::vector<FlameGraphItem>& d
             if( !v->IsEndValid() ) break;
             const auto srcloc = v->SrcLoc();
             int64_t duration;
-            uint64_t cnt;
             if ( m_flameRange.active )
             {
-                if( !GetZoneRunningTime( ctx, *v, m_flameGraphInvariant.range, duration, cnt ) ) continue;
+                if( !GetZoneRunningTime( ctx, *v, m_flameGraphInvariant.range, duration ) ) continue;
             }
             else
             {
-                if( !GetZoneRunningTime( ctx, *v, duration, cnt ) ) break;
+                if( !GetZoneRunningTime( ctx, *v, duration ) ) break;
             }
 
             if( srcloc == last )
@@ -245,7 +243,7 @@ void View::BuildFlameGraph( const Worker& worker, std::vector<FlameGraphItem>& d
     }
 }
 
-void View::BuildFlameGraph( const Worker& worker, std::vector<FlameGraphItem>& data, const Vector<SampleData>& samples, unordered_flat_map<uint32_t, bool>& externalCache, uint32_t& lastImage, uint32_t& lastSource )
+void View::BuildFlameGraph( const Worker& worker, std::vector<FlameGraphItem>& data, const Vector<SampleData>& samples, const SortedVector<SampleData, SampleDataSort>& ctxSamples, unordered_flat_map<uint32_t, bool>& externalCache, uint32_t& lastImage, uint32_t& lastSource )
 {
     struct FrameCache
     {
@@ -256,6 +254,7 @@ void View::BuildFlameGraph( const Worker& worker, std::vector<FlameGraphItem>& d
 
     std::vector<FrameCache> cache;
 
+    const SampleData* cit = ctxSamples.begin();
     for( auto& v : samples )
     {
         if ( m_flameGraphInvariant.range.active )
@@ -265,6 +264,14 @@ void View::BuildFlameGraph( const Worker& worker, std::vector<FlameGraphItem>& d
             {
                 continue;
             }
+        }
+
+        // Context switch samples are excluded, following the sampling statistics.
+        if( cit != ctxSamples.end() )
+        {
+            const auto vt = v.time.Val();
+            cit = std::lower_bound( cit, ctxSamples.end(), vt, []( const auto& l, const auto& r ) { return (uint64_t)l.time.Val() < (uint64_t)r; } );
+            if( cit != ctxSamples.end() && cit->time.Val() == vt ) continue;
         }
 
         cache.clear();
@@ -282,12 +289,12 @@ void View::BuildFlameGraph( const Worker& worker, std::vector<FlameGraphItem>& d
                     for( uint8_t j=frameData->size; j>0; j-- )
                     {
                         const auto frame = frameData->data[j-1];
-                        const auto symaddr = frame.symAddr;
-                        if( symaddr != 0 )
-                        {
-                            cache.emplace_back( FrameCache { symaddr, frame.name } );
-                        }
+                        cache.emplace_back( FrameCache { frame.symAddr, frame.symAddr ? frame.name : frameData->imageName } );
                     }
+                }
+                else
+                {
+                    cache.emplace_back( FrameCache { 0, StringIdx {} } );
                 }
             }
         }
@@ -303,10 +310,9 @@ void View::BuildFlameGraph( const Worker& worker, std::vector<FlameGraphItem>& d
                         for( uint8_t j=frameData->size; j>0; j-- )
                         {
                             const auto frame = frameData->data[j-1];
-                            const auto symaddr = frame.symAddr;
-                            if( symaddr != 0 && !m_worker.IsSourceExternal( frame.file, externalCache, lastSource ) )
+                            if( !m_worker.IsSourceExternal( frame.file, externalCache, lastSource ) )
                             {
-                                cache.emplace_back( FrameCache { symaddr, frame.name } );
+                                cache.emplace_back( FrameCache { frame.symAddr, frame.symAddr ? frame.name : frameData->imageName } );
                             }
                         }
                     }
@@ -324,13 +330,13 @@ void View::BuildFlameGraph( const Worker& worker, std::vector<FlameGraphItem>& d
                     for( uint8_t j=frameData->size; j>0; j-- )
                     {
                         const auto frame = frameData->data[j-1];
-                        const auto symaddr = frame.symAddr;
-                        if( symaddr != 0 )
-                        {
-                            bool external = imageExternal || m_worker.IsSourceExternal( frame.file, externalCache, lastSource );
-                            cache.emplace_back( FrameCache { symaddr, frame.name, external } );
-                        }
+                        bool external = imageExternal || m_worker.IsSourceExternal( frame.file, externalCache, lastSource );
+                        cache.emplace_back( FrameCache { frame.symAddr, frame.symAddr ? frame.name : frameData->imageName, external } );
                     }
+                }
+                else
+                {
+                    cache.emplace_back( FrameCache { 0, StringIdx {}, true } );
                 }
             }
 
@@ -349,18 +355,34 @@ void View::BuildFlameGraph( const Worker& worker, std::vector<FlameGraphItem>& d
             }
         }
 
+        const auto period = worker.GetSamplingPeriod();
         auto vec = &data;
         for( auto& v : cache )
         {
-            auto it = std::find_if( vec->begin(), vec->end(), [symaddr = v.symaddr]( const auto& v ) { return v.srcloc == symaddr; } );
+            // Unresolved frames carry the image name instead of the symbol name, so they must be
+            // grouped by name in both modes. Grouping them by address would merge all images into one item.
+            std::vector<FlameGraphItem>::iterator it;
+            if( v.symaddr == 0 )
+            {
+                it = std::ranges::find_if( *vec, [name = v.name]( const auto& v ) { return v.srcloc == 0 && v.name == name; } );
+            }
+            else if( m_flameSymbolByName )
+            {
+                it = std::ranges::find_if( *vec, [name = v.name]( const auto& v ) { return v.srcloc != 0 && v.name == name; } );
+            }
+            else
+            {
+                it = std::ranges::find_if( *vec, [symaddr = v.symaddr]( const auto& v ) { return v.srcloc == symaddr; } );
+            }
+
             if( it == vec->end() )
             {
-                vec->emplace_back( FlameGraphItem { (int64_t)v.symaddr, 1, v.name } );
+                vec->emplace_back( FlameGraphItem { (int64_t)v.symaddr, period, v.name } );
                 vec = &vec->back().children;
             }
             else
             {
-                it->time++;
+                it->time += period;
                 vec = &it->children;
             }
         }
@@ -378,12 +400,15 @@ struct FlameGraphContext
     ImDrawList* draw;
     ImVec2 wpos;
     ImVec2 dpos;
+    float w;
     float ty;
     float ostep;
     double pxns;
     double nspx;
     int64_t vStart;
     int64_t vEnd;
+    float yMin;
+    float yMax;
 };
 
 void View::DrawFlameGraphLevel( const std::vector<FlameGraphItem>& data, FlameGraphContext& ctx, int depth, bool samples )
@@ -395,6 +420,12 @@ void View::DrawFlameGraphLevel( const std::vector<FlameGraphItem>& data, FlameGr
     const auto draw = ctx.draw;
     const auto ostep = ctx.ostep;
     const auto& wpos = ctx.wpos;
+
+    const auto y0 = wpos.y + depth * ostep;
+    if( y0 > ctx.yMax ) return;
+
+    const auto y1 = y0 + ctx.ty;
+    const auto visibleY = y1 >= ctx.yMin;
 
     const auto MinVisNs = int64_t( round( GetScale() * MinVisSize * nspx ) );
 
@@ -421,8 +452,13 @@ void View::DrawFlameGraphLevel( const std::vector<FlameGraphItem>& data, FlameGr
             }
             const auto px0 = ( it->begin - vStart ) * pxns;
             const auto px1 = ( (next-1)->begin + (next-1)->time - vStart ) * pxns;
-            draw->AddRectFilled( ImVec2( wpos.x + px0, wpos.y + depth * ostep ), ImVec2( wpos.x + std::max( px1, px0 + MinVisSize ), wpos.y + ( depth + 1 ) * ostep ), 0xFF666666 );
-            DrawZigZag( draw, ImVec2( wpos.x, wpos.y + ( depth + 0.5f ) * ostep ), px0, std::max( px1, px0 + MinVisSize ), ctx.ty / 4, 0xFF444444 );
+            if( visibleY )
+            {
+                const auto drawX0 = std::max( px0, -10.0 );
+                const auto drawX1 = std::min( std::max( px1, px0 + MinVisSize ), double( ctx.w + 10 ) );
+                draw->AddRectFilled( ImVec2( wpos.x + drawX0, y0 ), ImVec2( wpos.x + drawX1, y0 + ostep ), 0xFF666666 );
+                DrawZigZag( draw, ImVec2( wpos.x, y0 + 0.5f * ostep ), drawX0, drawX1, ctx.ty / 4, 0xFF444444 );
+            }
             it = next;
         }
         else
@@ -435,10 +471,17 @@ void View::DrawFlameGraphLevel( const std::vector<FlameGraphItem>& data, FlameGr
 
 void View::DrawFlameGraphItem( const FlameGraphItem& item, FlameGraphContext& ctx, int depth, bool samples )
 {
-    const auto x0 = ctx.dpos.x + item.begin * ctx.pxns;
+    const auto x0 = ctx.dpos.x + ( item.begin - ctx.vStart ) * ctx.pxns;
     const auto x1 = x0 + item.time * ctx.pxns;
     const auto y0 = ctx.dpos.y + depth * ctx.ostep;
     const auto y1 = y0 + ctx.ty;
+
+    if( y0 > ctx.yMax ) return;
+    if( y1 < ctx.yMin )
+    {
+        DrawFlameGraphLevel( item.children, ctx, depth+1, samples );
+        return;
+    }
 
     const SourceLocation* srcloc;
     uint32_t color;
@@ -456,9 +499,20 @@ void View::DrawFlameGraphItem( const FlameGraphItem& item, FlameGraphContext& ct
     }
     else
     {
-        name = m_worker.GetString( item.name );
         const auto symAddr = (uint64_t)item.srcloc;
-        auto sym = m_worker.GetSymbolData( symAddr );
+        const auto known = symAddr != 0;
+        // Unresolved frames have no symbol name. They are labelled with the image name, if it is known.
+        if( item.name.Active() )
+        {
+            name = m_worker.GetString( item.name );
+            if( !known && m_shortImageNames ) name = ShortenImageName( name );
+        }
+        else
+        {
+            name = "[unknown]";
+        }
+
+        auto sym = known ? m_worker.GetSymbolData( symAddr ) : nullptr;
         if( sym )
         {
             auto namehash = charutil::hash( name );
@@ -473,14 +527,21 @@ void View::DrawFlameGraphItem( const FlameGraphItem& item, FlameGraphContext& ct
         {
             color = 0xFF888888;
         }
+
         if( symAddr >> 63 != 0 )
         {
             textColor = 0xFF8888FF;
+        }
+        else if( !known )
+        {
+            textColor = 0xFFCCCCCC;
         }
     }
 
     const auto hiColor = HighlightColor( color );
     const auto darkColor = DarkenColor( color );
+    const auto drawX0 = std::max<double>( x0, ctx.wpos.x - 10.0 );
+    const auto drawX1 = std::min<double>( std::max( x1, x0 + MinVisSize ), ctx.wpos.x + ctx.w + 10.0 );
 
     const auto zsz = x1 - x0;
 
@@ -507,28 +568,39 @@ void View::DrawFlameGraphItem( const FlameGraphItem& item, FlameGraphContext& ct
         normalized = name;
     }
 
-    const bool hover = ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect( ImVec2( x0, y0 ), ImVec2( x1, y1 ) );
+    const bool hover = ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect( ImVec2( drawX0, y0 ), ImVec2( drawX1, y1 ) );
 
-    ctx.draw->AddRectFilled( ImVec2( x0, y0 ), ImVec2( x1, y1 ), color );
+    ctx.draw->AddRectFilled( ImVec2( drawX0, y0 ), ImVec2( drawX1, y1 ), color );
     if( hover )
     {
-        ctx.draw->AddRect( ImVec2( x0 - 0.5f, y0 - 0.5f ), ImVec2( x1 - 0.5f, y1 - 0.5f ), 0xFFEEEEEE );
+        ctx.draw->AddRect( ImVec2( drawX0 - 0.5f, y0 - 0.5f ), ImVec2( drawX1 - 0.5f, y1 - 0.5f ), 0xFFEEEEEE );
     }
     else
     {
-        DrawLine( ctx.draw, ImVec2( x0, y1 ), ImVec2( x0, y0 ), ImVec2( x1-1, y0 ), hiColor );
-        DrawLine( ctx.draw, ImVec2( x0, y1 ), ImVec2( x1-1, y1), ImVec2( x1-1, y0 ), darkColor );
+        DrawLine( ctx.draw, ImVec2( drawX0, y1 ), ImVec2( drawX0, y0 ), ImVec2( drawX1-1, y0 ), hiColor );
+        DrawLine( ctx.draw, ImVec2( drawX0, y1 ), ImVec2( drawX1-1, y1), ImVec2( drawX1-1, y0 ), darkColor );
     }
 
-    if( tsz.x < zsz )
+    const auto tx0 = std::max<double>( x0, ctx.wpos.x );
+    const auto tx1 = std::min<double>( x1, ctx.wpos.x + ctx.w );
+    if( tx1 > tx0 && tsz.x < zsz )
     {
         const auto x = ( x1 + x0 - tsz.x ) * 0.5;
-        DrawTextContrast( ctx.draw, ImVec2( x, y0 ), textColor, normalized );
+        if( x < tx0 || x > tx1 - tsz.x )
+        {
+            ImGui::PushClipRect( ImVec2( tx0, y0 ), ImVec2( tx1, y1 ), true );
+            DrawTextContrast( ctx.draw, ImVec2( std::max( tx0, std::min( tx1 - tsz.x, x ) ), y0 ), textColor, normalized );
+            ImGui::PopClipRect();
+        }
+        else
+        {
+            DrawTextContrast( ctx.draw, ImVec2( x, y0 ), textColor, normalized );
+        }
     }
-    else
+    else if( tx1 > tx0 )
     {
-        ImGui::PushClipRect( ImVec2( x0, y0 ), ImVec2( x1, y1 ), true );
-        DrawTextContrast( ctx.draw, ImVec2( x0, y0 ), textColor, normalized );
+        ImGui::PushClipRect( ImVec2( tx0, y0 ), ImVec2( tx1, y1 ), true );
+        DrawTextContrast( ctx.draw, ImVec2( tx0, y0 ), textColor, normalized );
         ImGui::PopClipRect();
     }
 
@@ -537,13 +609,13 @@ void View::DrawFlameGraphItem( const FlameGraphItem& item, FlameGraphContext& ct
         uint64_t self = item.time;
         for( auto& v : item.children ) self -= v.time;
 
-        ImGui::BeginTooltip();
         if( samples )
         {
             const auto symAddr = (uint64_t)item.srcloc;
-            auto sym = m_worker.GetSymbolData( symAddr );
+            auto sym = symAddr != 0 ? m_worker.GetSymbolData( symAddr ) : nullptr;
             if( sym )
             {
+                ImGui::BeginTooltip();
                 TextFocused( "Name:", normalized );
                 if( sym->isInline )
                 {
@@ -588,26 +660,46 @@ void View::DrawFlameGraphItem( const FlameGraphItem& item, FlameGraphContext& ct
                 }
                 TextFocused( "Image:", m_worker.GetString( sym->imageName ) );
                 ImGui::Separator();
-                const auto period = m_worker.GetSamplingPeriod();
-                TextFocused( "Execution time:", TimeToString( item.time * period ) );
+                TextFocused( "Execution time:", TimeToString( item.time ) );
                 if( !item.children.empty() )
                 {
-                    TextFocused( "Self time:", TimeToString( self * period ) );
+                    TextFocused( "Self time:", TimeToString( self ) );
                     char buf[64];
                     PrintStringPercent( buf, 100.f * self / item.time );
                     ImGui::SameLine();
                     TextDisabledUnformatted( buf );
                 }
+                ImGui::EndTooltip();
 
-                if( IsMouseClicked( 0 ) )
+                if( IsMouseClicked( ImGuiMouseButton_Left ) )
                 {
                     ViewDispatch( file, line, symAddr );
                 }
             }
-            ImGui::EndTooltip();
+            else if( symAddr == 0 )
+            {
+                ImGui::BeginTooltip();
+                const auto image = item.name.Active() ? m_worker.GetString( item.name ) : nullptr;
+                if( image && strcmp( image, "[unknown]" ) != 0 )
+                {
+                    TextFocused( "Image:", image );
+                    ImGui::Separator();
+                }
+                TextFocused( "Execution time:", TimeToString( item.time ) );
+                if( !item.children.empty() )
+                {
+                    TextFocused( "Self time:", TimeToString( self ) );
+                    char buf[64];
+                    PrintStringPercent( buf, 100.f * self / item.time );
+                    ImGui::SameLine();
+                    TextDisabledUnformatted( buf );
+                }
+                ImGui::EndTooltip();
+            }
         }
         else
         {
+            ImGui::BeginTooltip();
             if( srcloc->name.active )
             {
                 ImGui::TextUnformatted( m_worker.GetString( srcloc->name ) );
@@ -629,7 +721,7 @@ void View::DrawFlameGraphItem( const FlameGraphItem& item, FlameGraphContext& ct
             }
             ImGui::EndTooltip();
 
-            if( IsMouseClicked( 0 ) )
+            if( IsMouseClicked( ImGuiMouseButton_Left ) )
             {
                 m_findZone.ShowZone( item.srcloc, slName );
             }
@@ -639,8 +731,10 @@ void View::DrawFlameGraphItem( const FlameGraphItem& item, FlameGraphContext& ct
     DrawFlameGraphLevel( item.children, ctx, depth+1, samples );
 }
 
-void View::DrawFlameGraphHeader( uint64_t timespan )
+void View::DrawFlameGraphHeader( int64_t vStart, int64_t vEnd )
 {
+    assert( vStart < vEnd );
+
     const auto wpos = ImGui::GetCursorScreenPos();
     const auto dpos = wpos + ImVec2( 0.5f, 0.5f );
     const auto w = ImGui::GetContentRegionAvail().x;// - ImGui::GetStyle().ScrollbarSize;
@@ -650,6 +744,13 @@ void View::DrawFlameGraphHeader( uint64_t timespan )
     const auto ty0375 = round( ty * 0.375f );
     const auto ty05 = round( ty * 0.5f );
 
+    if( w <= 0 )
+    {
+        ImGui::Dummy( ImVec2( 0, ty * 1.5f ) );
+        return;
+    }
+
+    const auto timespan = vEnd - vStart;
     const auto pxns = w / double( timespan );
     const auto nspx = 1.0 / pxns;
     const auto scale = std::max( 0.0, round( log10( nspx ) + 2 ) );
@@ -698,11 +799,104 @@ void View::DrawFlameGraphHeader( uint64_t timespan )
     }
 }
 
-static void MergeFlameGraph( std::vector<FlameGraphItem>& dst, std::vector<FlameGraphItem>&& src )
+static bool ApplyFlameGraphPan( int64_t& start, int64_t& end, double& pan, double delta )
+{
+    pan += delta;
+    const auto d = int64_t( pan );
+    if( d == 0 ) return false;
+
+    start += d;
+    end += d;
+    pan -= d;
+    return true;
+}
+
+static bool DrawFlameGraphHorizontalPosition( int64_t& vStart, int64_t& vEnd, double& pan, int64_t totalSpan )
+{
+    assert( vStart < vEnd );
+    assert( totalSpan > 0 );
+
+    const auto wpos = ImGui::GetCursorScreenPos();
+    const auto w = ImGui::GetContentRegionAvail().x;
+    const auto scale = GetScale();
+    const auto h = std::max( 8.f * scale, 8.f );
+
+    if( w <= 0 )
+    {
+        ImGui::Dummy( ImVec2( 0, h ) );
+        return false;
+    }
+
+    ImGui::InvisibleButton( "##flameHorizontalPosition", ImVec2( w, h ) );
+    const auto hover = ImGui::IsItemHovered();
+    const auto active = ImGui::IsItemActive();
+    auto draw = ImGui::GetWindowDrawList();
+
+    const auto fullSpan = float( totalSpan );
+    const auto x0 = wpos.x + w * ( float( vStart ) / fullSpan );
+    const auto x1 = wpos.x + w * ( float( vEnd ) / fullSpan );
+    auto thumbX0 = std::max( wpos.x, std::min( wpos.x + w, x0 ) );
+    auto thumbX1 = std::max( thumbX0, std::min( wpos.x + w, x1 ) );
+    const auto minThumbWidth = std::max( 9.f * scale, 9.f );
+    if( thumbX1 - thumbX0 < minThumbWidth )
+    {
+        const auto center = ( thumbX0 + thumbX1 ) * 0.5f;
+        thumbX0 = center - ( minThumbWidth * 0.5f );
+        thumbX1 = center + ( minThumbWidth * 0.5f );
+        if( thumbX0 < wpos.x )
+        {
+            thumbX0 = wpos.x;
+            thumbX1 = thumbX0 + minThumbWidth;
+        }
+        else if( thumbX1 > wpos.x + w )
+        {
+            thumbX1 = wpos.x + w;
+            thumbX0 = thumbX1 - minThumbWidth;
+        }
+    }
+    const auto y0 = wpos.y + floor( h * 0.25f );
+    const auto y1 = wpos.y + ceil( h * 0.75f );
+
+    draw->AddRectFilled( ImVec2( wpos.x, y0 ), ImVec2( wpos.x + w, y1 ), 0x33888888 );
+    draw->AddRectFilled( ImVec2( thumbX0, y0 ), ImVec2( thumbX1, y1 ), active ? 0xCCFFFFFF : hover ? 0xAAFFFFFF : 0x66FFFFFF );
+
+    if( hover )
+    {
+        ImGui::BeginTooltip();
+        TextFocused( "View span:", TimeToString( vEnd - vStart ) );
+        ImGui::EndTooltip();
+    }
+
+    if( active && ImGui::IsMouseDragging( ImGuiMouseButton_Left ) )
+    {
+        const auto delta = ImGui::GetIO().MouseDelta.x;
+        ApplyFlameGraphPan( vStart, vEnd, pan, delta * totalSpan / w );
+        return delta != 0;
+    }
+
+    return false;
+}
+
+static void MergeFlameGraph( std::vector<FlameGraphItem>& dst, std::vector<FlameGraphItem>&& src, bool byName )
 {
     for( auto& v : src )
     {
-        auto it = std::find_if( dst.begin(), dst.end(), [&v]( const auto& vv ) { return vv.srcloc == v.srcloc; } );
+        // Matches the grouping performed in BuildFlameGraph. In instrumentation mode no name is ever set,
+        // so the srcloc == 0 branch degenerates to a plain srcloc comparison.
+        std::vector<FlameGraphItem>::iterator it;
+        if( v.srcloc == 0 )
+        {
+            it = std::ranges::find_if( dst, [&v]( const auto& vv ) { return vv.srcloc == 0 && vv.name == v.name; } );
+        }
+        else if( byName )
+        {
+            it = std::ranges::find_if( dst, [&v]( const auto& vv ) { return vv.srcloc != 0 && vv.name == v.name; } );
+        }
+        else
+        {
+            it = std::ranges::find_if( dst, [&v]( const auto& vv ) { return vv.srcloc == v.srcloc; } );
+        }
+
         if( it == dst.end() )
         {
             dst.emplace_back( std::move( v ) );
@@ -710,7 +904,7 @@ static void MergeFlameGraph( std::vector<FlameGraphItem>& dst, std::vector<Flame
         else
         {
             it->time += v.time;
-            MergeFlameGraph( it->children, std::move( v.children ) );
+            MergeFlameGraph( it->children, std::move( v.children ), byName );
         }
     }
 }
@@ -725,35 +919,102 @@ static void FixupTime( std::vector<FlameGraphItem>& data, uint64_t t = 0 )
     }
 }
 
+static int64_t GetFlameGraphTime( const std::vector<FlameGraphItem>& data )
+{
+    int64_t time = 0;
+    for( const auto& v : data ) time += v.time;
+    return time;
+}
+
+static int GetFlameGraphDepth( const std::vector<FlameGraphItem>& data, int64_t minVisNs )
+{
+    int maxDepth = 1;
+    for( const auto& v : data )
+    {
+        if( v.time >= minVisNs && !v.children.empty() )
+        {
+            maxDepth = std::max( maxDepth, 1 + GetFlameGraphDepth( v.children, minVisNs ) );
+        }
+    }
+    return maxDepth;
+}
+
+static void ClampFlameGraphViewport( int64_t& start, int64_t& end, int64_t totalSpan )
+{
+    assert( totalSpan > 0 );
+
+    if( end < start ) std::swap( start, end );
+
+    const int64_t minSpan = 5;
+    auto span = end - start;
+    if( span < minSpan )
+    {
+        span = minSpan;
+        const auto center = ( start + end ) / 2;
+        start = center - span / 2;
+        end = start + span;
+    }
+
+    if( span >= totalSpan )
+    {
+        start = 0;
+        end = totalSpan;
+        return;
+    }
+
+    if( start < 0 )
+    {
+        start = 0;
+        end = span;
+    }
+    else if( end > totalSpan )
+    {
+        end = totalSpan;
+        start = end - span;
+    }
+
+    assert( start >= 0 );
+    assert( end <= totalSpan );
+    assert( end > start );
+}
+
 
 void View::DrawFlameGraph()
 {
     const auto scale = GetScale();
     ImGui::SetNextWindowSize( ImVec2( 1400 * scale, 800 * scale ), ImGuiCond_FirstUseEver );
+    m_flameGraphConstraint.Constrain();
     ImGui::Begin( "Flame graph", &m_showFlameGraph, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse );
     if( ImGui::GetCurrentWindowRead()->SkipItems ) { ImGui::End(); return; }
 
+    const auto ResetGraph = [this]() {
+        m_flameGraphInvariant.Reset();
+        m_flameGraphViewStart = 0;
+        m_flameGraphViewEnd = 0;
+        m_flameGraphPan = 0;
+    };
+
     ImGui::PushStyleVar( ImGuiStyleVar_FramePadding, ImVec2( 2, 2 ) );
-    if( ImGui::RadioButton( ICON_FA_SYRINGE " Instrumentation", &m_flameMode, 0 ) ) m_flameGraphInvariant.Reset();
+    if( ImGui::RadioButton( ICON_FA_SYRINGE " Instrumentation", &m_flameMode, 0 ) ) ResetGraph();
 
     if( m_worker.AreCallstackSamplesReady() && m_worker.GetCallstackSampleCount() > 0 )
     {
         ImGui::SameLine();
-        if( ImGui::RadioButton( ICON_FA_EYE_DROPPER " Sampling", &m_flameMode, 1 ) ) m_flameGraphInvariant.Reset();
+        if( ImGui::RadioButton( ICON_FA_EYE_DROPPER " Sampling", &m_flameMode, 1 ) ) ResetGraph();
     }
 
     ImGui::SameLine();
     ImGui::SeparatorEx( ImGuiSeparatorFlags_Vertical );
     ImGui::SameLine();
 
-    if( ImGui::Checkbox( ICON_FA_ARROW_UP_WIDE_SHORT " Sort by time", &m_flameSort ) ) m_flameGraphInvariant.Reset();
+    if( ImGui::Checkbox( ICON_FA_ARROW_UP_WIDE_SHORT " Sort by time", &m_flameSort ) ) ResetGraph();
 
     if( m_flameMode == 0 )
     {
         if( m_worker.HasContextSwitches() )
         {
             ImGui::SameLine();
-            if( ImGui::Checkbox( "Running time", &m_flameRunningTime ) ) m_flameGraphInvariant.Reset();
+            if( ImGui::Checkbox( "Running time", &m_flameRunningTime ) ) ResetGraph();
         }
         else
         {
@@ -767,11 +1028,19 @@ void View::DrawFlameGraph()
         ImGui::SameLine();
         ImGui::Text( ICON_FA_SHIELD_HALVED "External" );
         ImGui::SameLine();
-        if( ImGui::Checkbox( "Frames", &m_flameExternal ) ) m_flameGraphInvariant.Reset();
+        if( ImGui::Checkbox( "Frames", &m_flameExternal ) ) ResetGraph();
         ImGui::SameLine();
         if( m_flameExternal ) ImGui::BeginDisabled();
-        if( ImGui::Checkbox( "Tails", &m_flameExternalTail ) ) m_flameGraphInvariant.Reset();
+        if( ImGui::Checkbox( "Tails", &m_flameExternalTail ) ) ResetGraph();
         if( m_flameExternal ) ImGui::EndDisabled();
+
+        ImGui::SameLine();
+        ImGui::SeparatorEx( ImGuiSeparatorFlags_Vertical );
+        ImGui::SameLine();
+        if( ImGui::Checkbox( "Group by name", &m_flameSymbolByName ) ) ResetGraph();
+
+        ImGui::SameLine();
+        ImGui::Checkbox( ICON_FA_SCISSORS " Short images", &m_shortImageNames );
     }
 
     ImGui::SameLine();
@@ -786,7 +1055,7 @@ void View::DrawFlameGraph()
             m_flameRange.max = m_vd.zvEnd;
         }
 
-        m_flameGraphInvariant.Reset();
+        ResetGraph();
     }
     if( m_flameRange.active )
     {
@@ -796,7 +1065,21 @@ void View::DrawFlameGraph()
         ToggleButton( ICON_FA_RULER " Limits", m_showRanges );
     }
 
-    auto& td = m_worker.GetThreadData();
+    ImGui::SameLine();
+    ImGui::SeparatorEx( ImGuiSeparatorFlags_Vertical );
+    ImGui::SameLine();
+
+    if( ImGui::Button( "Reset view" ) )
+    {
+        m_flameGraphViewStart = 0;
+        m_flameGraphViewEnd = 0;
+        m_flameGraphPan = 0;
+    }
+
+    m_flameGraphConstraint.MarkMinWidth();
+
+    UpdateThreadOrder();
+    const auto& td = m_threadOrder;
     auto expand = ImGui::TreeNode( ICON_FA_SHUFFLE " Visible threads:" );
     ImGui::SameLine();
     size_t visibleThreads = 0;
@@ -823,7 +1106,7 @@ void View::DrawFlameGraph()
             {
                 FlameGraphThread( t->id ) = true;
             }
-            m_flameGraphInvariant.Reset();
+            ResetGraph();
         }
         ImGui::SameLine();
         if( ImGui::SmallButton( "Unselect all" ) )
@@ -832,7 +1115,12 @@ void View::DrawFlameGraph()
             {
                 FlameGraphThread( t->id ) = false;
             }
-            m_flameGraphInvariant.Reset();
+            ResetGraph();
+        }
+        ImGui::SameLine();
+        if( ImGui::SmallButton( "Sort" ) )
+        {
+            SortThreads();
         }
 
         const auto& style = ImGui::GetStyle();
@@ -849,7 +1137,7 @@ void View::DrawFlameGraph()
         const auto rows = ( tsz + cols - 1 ) / cols;
         const auto rowsVisible = std::min<float>( rows, 7.5f );
         const auto rowsHeight = ImGui::GetTextLineHeightWithSpacing() * rowsVisible;
-        ImGui::BeginChild( "###flamegraphthreadrows", ImVec2( -1, rowsHeight ) );
+        ImGui::BeginChild( "###flamegraphthreadrows", ImVec2( -1, rowsHeight ), false, ImGuiWindowFlags_AlwaysVerticalScrollbar );
 
         int idx = 0;
         ImGui::BeginTable( "##flamegraphthreadcols", cols, ImGuiTableFlags_NoSavedSettings );
@@ -860,7 +1148,7 @@ void View::DrawFlameGraph()
             const auto threadColor = GetThreadColor( t->id, 0 );
             SmallColorBox( threadColor );
             ImGui::SameLine();
-            if( SmallCheckbox( m_worker.GetThreadName( t->id ), &FlameGraphThread( t->id ) ) ) m_flameGraphInvariant.Reset();
+            if( SmallCheckbox( m_worker.GetThreadName( t->id ), &FlameGraphThread( t->id ) ) ) ResetGraph();
             ImGui::PopID();
             if( t->isFiber )
             {
@@ -876,10 +1164,19 @@ void View::DrawFlameGraph()
     ImGui::Separator();
     ImGui::PopStyleVar();
 
+    bool flameDataRebuilt = false;
+    const auto oldZsz = GetFlameGraphTime( m_flameGraphData );
+    const auto flameRangeChanged = m_flameGraphInvariant.range != m_flameRange;
     if( m_flameMode == 0 && ( m_flameGraphInvariant.count != m_worker.GetZoneCount() || m_flameGraphInvariant.lastTime != m_worker.GetLastTime() ) ||
         m_flameMode == 1 && ( m_flameGraphInvariant.count != m_worker.GetCallstackSampleCount() ) ||
-        m_flameGraphInvariant.range != m_flameRange )
+        flameRangeChanged )
     {
+        if( flameRangeChanged )
+        {
+            m_flameGraphViewStart = 0;
+            m_flameGraphViewEnd = 0;
+            m_flameGraphPan = 0;
+        }
         m_flameGraphInvariant.range = m_flameRange;
 
         size_t sz = 0;
@@ -928,7 +1225,7 @@ void View::DrawFlameGraph()
                         unordered_flat_map<uint32_t, bool> externalCache;
                         uint32_t lastImage = 0;
                         uint32_t lastSource = 0;
-                        BuildFlameGraph( m_worker, threadData[idx], thread->samples, externalCache, lastImage, lastSource );
+                        BuildFlameGraph( m_worker, threadData[idx], thread->samples, thread->ctxSwitchSamples, externalCache, lastImage, lastSource );
                     } );
                     idx++;
                 }
@@ -941,25 +1238,26 @@ void View::DrawFlameGraph()
         m_flameGraphData.clear();
         if( !threadData.empty() )
         {
+            const auto byName = m_flameMode == 1 && m_flameSymbolByName;
             std::swap( m_flameGraphData, threadData[0] );
             for( size_t i=1; i<threadData.size(); i++ )
             {
-                MergeFlameGraph( m_flameGraphData, std::move( threadData[i] ) );
+                MergeFlameGraph( m_flameGraphData, std::move( threadData[i] ), byName );
             }
         }
 
         if( m_flameSort ) SortFlameGraph( m_flameGraphData );
         FixupTime( m_flameGraphData );
+        flameDataRebuilt = true;
     }
 
-    int64_t zsz = 0;
-    for( auto& v : m_flameGraphData ) zsz += v.time;
+    const auto zsz = GetFlameGraphTime( m_flameGraphData );
 
-    ImGui::BeginChild( "##flameGraph" );
-    const auto region = ImGui::GetContentRegionAvail();
-
-    if( m_flameGraphData.empty() )
+    if( m_flameGraphData.empty() || zsz <= 0 )
     {
+        m_flameGraphZoomAnim.active = false;
+
+        const auto region = ImGui::GetContentRegionAvail();
         ImGui::PushFont( g_fonts.normal, FontBig );
         ImGui::Dummy( ImVec2( 0, ( region.y - ImGui::GetTextLineHeight() * 2 ) * 0.5f ) );
         TextCentered( ICON_FA_CAT );
@@ -968,24 +1266,148 @@ void View::DrawFlameGraph()
     }
     else
     {
-        DrawFlameGraphHeader( m_flameMode == 0 ? zsz : zsz * m_worker.GetSamplingPeriod() );
+        const auto viewStart = m_flameGraphZoomAnim.active ? m_flameGraphZoomAnim.start1 : m_flameGraphViewStart;
+        const auto viewEnd = m_flameGraphZoomAnim.active ? m_flameGraphZoomAnim.end1 : m_flameGraphViewEnd;
+        if( m_flameGraphViewEnd <= m_flameGraphViewStart || m_flameGraphViewStart < 0 )
+        {
+            m_flameGraphViewStart = 0;
+            m_flameGraphViewEnd = zsz;
+            m_flameGraphPan = 0;
+            m_flameGraphZoomAnim.active = false;
+        }
+        else if( flameDataRebuilt && oldZsz > 0 && viewStart == 0 && viewEnd == oldZsz )
+        {
+            m_flameGraphViewEnd = zsz;
+            m_flameGraphPan = 0;
+            m_flameGraphZoomAnim.active = false;
+        }
+        else if( flameDataRebuilt && m_flameGraphZoomAnim.active )
+        {
+            ClampFlameGraphViewport( m_flameGraphZoomAnim.start1, m_flameGraphZoomAnim.end1, zsz );
+        }
+
+        UpdateZoomAnimation( m_flameGraphZoomAnim, m_flameGraphViewStart, m_flameGraphViewEnd, ImGui::GetIO().DeltaTime );
+        ClampFlameGraphViewport( m_flameGraphViewStart, m_flameGraphViewEnd, zsz );
+
+        DrawFlameGraphHeader( m_flameGraphViewStart, m_flameGraphViewEnd );
+        if( DrawFlameGraphHorizontalPosition( m_flameGraphViewStart, m_flameGraphViewEnd, m_flameGraphPan, zsz ) )
+        {
+            m_flameGraphZoomAnim.active = false;
+            ClampFlameGraphViewport( m_flameGraphViewStart, m_flameGraphViewEnd, zsz );
+        }
+
+        ImGui::BeginChild( "##flameGraphBody", ImVec2( 0, 0 ), false, ImGuiWindowFlags_NoScrollWithMouse );
+        const auto region = ImGui::GetContentRegionAvail();
+        const auto wpos = ImGui::GetCursorScreenPos();
+        const auto w = region.x;
+        if( w <= 0 )
+        {
+            ImGui::ItemSize( region );
+            ImGui::EndChild();
+            ImGui::End();
+            return;
+        }
+        const auto timespan = m_flameGraphViewEnd - m_flameGraphViewStart;
+        const auto nspx = double( timespan ) / w;
+        auto& io = ImGui::GetIO();
+        auto draw = ImGui::GetWindowDrawList();
+        const auto clipMin = draw->GetClipRectMin();
+        const auto clipMax = draw->GetClipRectMax();
+        const auto hover = ImGui::IsWindowHovered( ImGuiHoveredFlags_AllowWhenBlockedByActiveItem ) &&
+            ImGui::IsMouseHoveringRect( ImVec2( wpos.x, clipMin.y ), ImVec2( wpos.x + w, clipMax.y ), false );
+
+        const bool wheel_scroll = fabs( io.MouseWheelH ) > fabs( io.MouseWheel );
+        if( hover && ( IsMouseDragging( ImGuiMouseButton_Right ) || wheel_scroll ) )
+        {
+            const auto delta = GetMouseDragDelta( ImGuiMouseButton_Right );
+            const auto hwheel_delta = io.MouseWheelH * 50.f * m_horizontalScrollMultiplier;
+            if( delta.x != 0 || hwheel_delta != 0 )
+            {
+                m_flameGraphZoomAnim.active = false;
+                const auto changed = ApplyFlameGraphPan( m_flameGraphViewStart, m_flameGraphViewEnd, m_flameGraphPan, -( delta.x + hwheel_delta ) * nspx );
+                io.MouseClickedPos[1].x = io.MousePos.x;
+                if( changed )
+                {
+                    ClampFlameGraphViewport( m_flameGraphViewStart, m_flameGraphViewEnd, zsz );
+                }
+            }
+
+            if( delta.y != 0 )
+            {
+                ImGui::SetScrollY( std::clamp( ImGui::GetScrollY() - delta.y, 0.0f, ImGui::GetScrollMaxY() ) );
+                io.MouseClickedPos[1].y = io.MousePos.y;
+            }
+        }
+
+        const bool wheel_zoom = fabs( io.MouseWheel ) > fabs( io.MouseWheelH );
+        if( hover && wheel_zoom )
+        {
+            m_flameGraphPan = 0;
+            const auto wheel = io.MouseWheel;
+            const auto mouse = io.MousePos.x - wpos.x;
+            const auto p = mouse / w;
+            int64_t vStart, vEnd;
+            if( m_flameGraphZoomAnim.active )
+            {
+                vStart = m_flameGraphZoomAnim.start1;
+                vEnd = m_flameGraphZoomAnim.end1;
+            }
+            else
+            {
+                vStart = m_flameGraphViewStart;
+                vEnd = m_flameGraphViewEnd;
+            }
+            const auto zoomSpan = vEnd - vStart;
+            const auto p1 = zoomSpan * p;
+            const auto p2 = zoomSpan - p1;
+            double mod = 0.25;
+            if( io.KeyCtrl ) mod = 0.05;
+            else if( io.KeyShift ) mod = 0.5;
+            mod *= m_verticalScrollMultiplier;
+#ifndef __EMSCRIPTEN__
+            mod *= fabs( wheel );
+#endif
+
+            if( wheel > 0 )
+            {
+                vStart += int64_t( p1 * mod );
+                vEnd -= int64_t( p2 * mod );
+            }
+            else
+            {
+                vStart -= std::max<int64_t>( 1, int64_t( p1 * mod ) );
+                vEnd += std::max<int64_t>( 1, int64_t( p2 * mod ) );
+            }
+            ClampFlameGraphViewport( vStart, vEnd, zsz );
+            m_flameGraphZoomAnim.active = true;
+            m_flameGraphZoomAnim.start0 = m_flameGraphViewStart;
+            m_flameGraphZoomAnim.start1 = vStart;
+            m_flameGraphZoomAnim.end0 = m_flameGraphViewEnd;
+            m_flameGraphZoomAnim.end1 = vEnd;
+            m_flameGraphZoomAnim.progress = 0;
+        }
 
         FlameGraphContext ctx;
-        ctx.draw = ImGui::GetWindowDrawList();
-        ctx.wpos = ImGui::GetCursorScreenPos();
+        ctx.draw = draw;
+        ctx.wpos = wpos;
         ctx.dpos = ctx.wpos + ImVec2( 0.5f, 0.5f );
+        ctx.w = w;
         ctx.ty = ImGui::GetTextLineHeight();
         ctx.ostep = ctx.ty + 1;
-        ctx.pxns = region.x / zsz;
+        ctx.pxns = region.x / double( m_flameGraphViewEnd - m_flameGraphViewStart );
         ctx.nspx = 1.0 / ctx.pxns;
-        ctx.vStart = 0;
-        ctx.vEnd = zsz;
+        ctx.vStart = m_flameGraphViewStart;
+        ctx.vEnd = m_flameGraphViewEnd;
+        ctx.yMin = clipMin.y;
+        ctx.yMax = clipMax.y;
 
-        ImGui::ItemSize( region );
+        const auto MinVisNs = int64_t( round( GetScale() * MinVisSize * ctx.nspx ) );
+        const auto contentHeight = GetFlameGraphDepth( m_flameGraphData, MinVisNs ) * ctx.ostep;
+        ImGui::Dummy( ImVec2( 0, contentHeight ) );
         DrawFlameGraphLevel( m_flameGraphData, ctx, 0, m_flameMode == 1 );
-    }
 
-    ImGui::EndChild();
+        ImGui::EndChild();
+    }
 
     ImGui::End();
 }

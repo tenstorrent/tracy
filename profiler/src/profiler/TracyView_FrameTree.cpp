@@ -32,13 +32,14 @@ static tracy_force_inline T* GetFrameTreeItemGroup( unordered_flat_map<uint64_t,
     {
         it = tree.emplace( fidx, T( idx ) ).first;
     }
+    it->second.group.emplace( idx.data );
     return &it->second;
 }
 
 template<class T>
 static tracy_force_inline T* GetParentFrameTreeItemGroup( unordered_flat_map<uint64_t, T>& tree, CallstackFrameId idx, const Worker& worker )
 {
-    auto frameDataPtr = idx.custom ? worker.GetParentCallstackFrame( idx ) : worker.GetCallstackFrame( idx );
+    auto frameDataPtr = idx.custom ? worker.GetSyntheticCallstackFrame( idx ) : worker.GetCallstackFrame( idx );
     if( !frameDataPtr ) return nullptr;
 
     auto& frameData = *frameDataPtr;
@@ -50,6 +51,7 @@ static tracy_force_inline T* GetParentFrameTreeItemGroup( unordered_flat_map<uin
     {
         it = tree.emplace( fidx, T( idx ) ).first;
     }
+    it->second.group.emplace( idx.data );
     return &it->second;
 }
 
@@ -245,7 +247,8 @@ unordered_flat_map<uint64_t, CallstackFrameTree> View::GetParentsCallstackFrameT
     {
         for( auto& path : stacks )
         {
-            auto& cs = m_worker.GetParentCallstack( path.first );
+            auto& cs = m_worker.GetSyntheticCallstack( path.first );
+            if( cs.empty() ) continue;
             auto base = cs.back();
             auto treePtr = GetParentFrameTreeItemGroup( root, base, m_worker );
             if( treePtr )
@@ -264,7 +267,8 @@ unordered_flat_map<uint64_t, CallstackFrameTree> View::GetParentsCallstackFrameT
     {
         for( auto& path : stacks )
         {
-            auto& cs = m_worker.GetParentCallstack( path.first );
+            auto& cs = m_worker.GetSyntheticCallstack( path.first );
+            if( cs.empty() ) continue;
             auto base = cs.back();
             auto treePtr = GetFrameTreeItemNoGroup( root, base );
             treePtr->count += path.second;
@@ -375,7 +379,8 @@ unordered_flat_map<uint64_t, CallstackFrameTree> View::GetParentsCallstackFrameT
     {
         for( auto& path : stacks )
         {
-            auto& cs = m_worker.GetParentCallstack( path.first );
+            auto& cs = m_worker.GetSyntheticCallstack( path.first );
+            if( cs.empty() ) continue;
             auto base = cs.front();
             auto treePtr = GetParentFrameTreeItemGroup( root, base, m_worker );
             if( treePtr )
@@ -394,7 +399,8 @@ unordered_flat_map<uint64_t, CallstackFrameTree> View::GetParentsCallstackFrameT
     {
         for( auto& path : stacks )
         {
-            auto& cs = m_worker.GetParentCallstack( path.first );
+            auto& cs = m_worker.GetSyntheticCallstack( path.first );
+            if( cs.empty() ) continue;
             auto base = cs.front();
             auto treePtr = GetFrameTreeItemNoGroup( root, base );
             treePtr->count += path.second;
@@ -517,6 +523,12 @@ void View::DrawFrameTreeLevel( const unordered_flat_map<uint64_t, MemCallstackFr
                 ImGui::EndTooltip();
             }
 
+            if( v.group.size() > 1 )
+            {
+                ImGui::SameLine();
+                ImGui::TextDisabled( "(\xc3\x97%s)", RealToString( v.group.size() ) );
+            }
+
             if( m_callstackTreeBuzzAnim.Match( idx ) )
             {
                 const auto time = m_callstackTreeBuzzAnim.Time();
@@ -539,7 +551,7 @@ void View::DrawFrameTreeLevel( const unordered_flat_map<uint64_t, MemCallstackFr
             }
             if( ImGui::IsItemHovered() )
             {
-                DrawSourceTooltip( fileName, frame.line );
+                DrawSourceTooltip( fileName, frame.line, frame.line );
                 if( ImGui::IsItemClicked( 1 ) )
                 {
                     if( !ViewDispatch( fileName, frame.line, frame.symAddr ) )
@@ -666,6 +678,12 @@ void View::DrawFrameTreeLevel( const unordered_flat_map<uint64_t, CallstackFrame
                 ImGui::PopID();
             }
 
+            if( v.group.size() > 1 )
+            {
+                ImGui::SameLine();
+                ImGui::TextDisabled( "(\xc3\x97%s)", RealToString( v.group.size() ) );
+            }
+
             if( m_callstackTreeBuzzAnim.Match( idx ) )
             {
                 const auto time = m_callstackTreeBuzzAnim.Time();
@@ -688,7 +706,7 @@ void View::DrawFrameTreeLevel( const unordered_flat_map<uint64_t, CallstackFrame
             }
             if( ImGui::IsItemHovered() )
             {
-                DrawSourceTooltip( fileName, frame.line );
+                DrawSourceTooltip( fileName, frame.line, frame.line );
                 if( ImGui::IsItemClicked( 1 ) )
                 {
                     if( !ViewDispatch( fileName, frame.line, frame.symAddr ) )
@@ -744,7 +762,7 @@ void View::DrawParentsFrameTreeLevel( const unordered_flat_map<uint64_t, Callsta
         auto& v = _v->second;
         const auto isKernel = ( m_worker.GetCanonicalPointer( v.frame ) >> 63 ) != 0;
         idx++;
-        auto frameDataPtr = v.frame.custom ? m_worker.GetParentCallstackFrame( v.frame ) : m_worker.GetCallstackFrame( v.frame );
+        auto frameDataPtr = v.frame.custom ? m_worker.GetSyntheticCallstackFrame( v.frame ) : m_worker.GetCallstackFrame( v.frame );
         if( frameDataPtr )
         {
             auto& frameData = *frameDataPtr;
@@ -810,6 +828,12 @@ void View::DrawParentsFrameTreeLevel( const unordered_flat_map<uint64_t, Callsta
                 ImGui::PopID();
             }
 
+            if( v.group.size() > 1 )
+            {
+                ImGui::SameLine();
+                ImGui::TextDisabled( "(\xc3\x97%s)", RealToString( v.group.size() ) );
+            }
+
             if( m_callstackTreeBuzzAnim.Match( idx ) )
             {
                 const auto time = m_callstackTreeBuzzAnim.Time();
@@ -832,7 +856,7 @@ void View::DrawParentsFrameTreeLevel( const unordered_flat_map<uint64_t, Callsta
             }
             if( ImGui::IsItemHovered() )
             {
-                DrawSourceTooltip( fileName, frame.line );
+                DrawSourceTooltip( fileName, frame.line, frame.line );
                 if( ImGui::IsItemClicked( 1 ) )
                 {
                     if( !ViewDispatch( fileName, frame.line, frame.symAddr ) )

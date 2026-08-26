@@ -127,6 +127,8 @@ struct AddrStatData
     AddrStat ipTotalAsm = {};
     AddrStat ipMaxSrc = {};
     AddrStat ipMaxAsm = {};
+    uint64_t ipMaxSrcSum = 0;
+    uint64_t ipMaxAsmSum = 0;
     AddrStat hwMaxSrc = {};
     AddrStat hwMaxAsm = {};
     unordered_flat_map<uint64_t, AddrStat> ipCountSrc, ipCountAsm;
@@ -138,7 +140,7 @@ std::string FormatDisassemblyLine( const AsmLine& opcode, Worker& worker, std::v
 nlohmann::json JsonDisassembly( uint64_t symAddr, Worker& worker, const View& view );
 
 void GatherIpStats( uint64_t baseAddr, AddrStatData& as, const Worker& worker, bool limitView, const View& view, const char* filename, bool propagateInlines );
-void GatherAdditionalIpStats( uint64_t baseAddr, AddrStatData& as, const Worker& worker, bool limitView, const View& view, const char* filename, bool propagateInlines );
+void GatherAdditionalIpStats( uint64_t baseAddr, AddrStatData& as, Worker& worker, bool limitView, const View& view, const char* filename, bool propagateInlines );
 
 }
 

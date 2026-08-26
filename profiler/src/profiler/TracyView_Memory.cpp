@@ -174,6 +174,7 @@ void View::DrawMemory()
 {
     const auto scale = GetScale();
     ImGui::SetNextWindowSize( ImVec2( 1100 * scale, 500 * scale ), ImGuiCond_FirstUseEver );
+    m_memoryConstraint.Constrain();
     ImGui::Begin( "Memory", &m_memInfo.show, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse );
     if( ImGui::GetCurrentWindowRead()->SkipItems ) { ImGui::End(); return; }
 
@@ -255,6 +256,7 @@ void View::DrawMemory()
         ToggleButton( ICON_FA_RULER " Limits", m_showRanges );
     }
     ImGui::PopStyleVar();
+    m_memoryConstraint.MarkMinWidth();
 
     ImGui::Separator();
     ImGui::BeginChild( "##memory" );
@@ -435,7 +437,7 @@ void View::DrawMemory()
 
     ImGui::PushID( m_memInfo.pool );
     ImGui::Separator();
-    if( ImGui::TreeNode( ICON_FA_TREE " Bottom-up call stack tree" ) )
+    if( ImGui::TreeNode( ICON_FA_TREE ICON_FA_ARROW_UP " Bottom-up call stack tree" ) )
     {
         ImGui::SameLine();
         DrawHelpMarker( "Press ctrl key to display allocation info tooltip. Right click on function name to display allocations list." );
@@ -473,7 +475,7 @@ void View::DrawMemory()
     }
 
     ImGui::Separator();
-    if( ImGui::TreeNode( ICON_FA_TREE " Top-down call stack tree" ) )
+    if( ImGui::TreeNode( ICON_FA_TREE ICON_FA_ARROW_DOWN " Top-down call stack tree" ) )
     {
         ImGui::SameLine();
         DrawHelpMarker( "Press ctrl key to display allocation info tooltip. Right click on function name to display allocations list." );
@@ -564,7 +566,7 @@ void View::DrawMemoryAllocWindow()
             const auto cs = ev.CsAlloc();
             SmallCallstackButton( ICON_FA_ALIGN_JUSTIFY, cs, idx, tidAlloc );
             ImGui::SameLine();
-            DrawCallstackCalls( cs, 4 );
+            DrawCallstackCalls( cs, 6 );
         }
         if( ev.TimeFree() < 0 )
         {
@@ -590,7 +592,7 @@ void View::DrawMemoryAllocWindow()
                 const auto cs = ev.csFree.Val();
                 SmallCallstackButton( ICON_FA_ALIGN_JUSTIFY, cs, idx, tidFree );
                 ImGui::SameLine();
-                DrawCallstackCalls( cs, 4 );
+                DrawCallstackCalls( cs, 6 );
             }
             TextFocused( "Duration:", TimeToString( ev.TimeFree() - ev.TimeAlloc() ) );
         }
@@ -614,7 +616,7 @@ void View::DrawMemoryAllocWindow()
             if( hover )
             {
                 m_zoneHighlight = zoneAlloc;
-                if( IsMouseClicked( 2 ) )
+                if( IsMouseClicked( ImGuiMouseButton_Middle ) )
                 {
                     ZoomToZone( *zoneAlloc );
                 }
@@ -639,7 +641,7 @@ void View::DrawMemoryAllocWindow()
                 if( hover )
                 {
                     m_zoneHighlight = zoneFree;
-                    if( IsMouseClicked( 2 ) )
+                    if( IsMouseClicked( ImGuiMouseButton_Middle ) )
                     {
                         ZoomToZone( *zoneFree );
                     }
@@ -829,7 +831,7 @@ void View::ListMemData( std::vector<const MemEvent*>& vec, const std::function<v
                     if( hover )
                     {
                         m_zoneHighlight = zone;
-                        if( IsMouseClicked( 2 ) )
+                        if( IsMouseClicked( ImGuiMouseButton_Middle ) )
                         {
                             ZoomToZone( *zone );
                         }
@@ -873,7 +875,7 @@ void View::ListMemData( std::vector<const MemEvent*>& vec, const std::function<v
                         if( hover )
                         {
                             m_zoneHighlight = zoneFree;
-                            if( IsMouseClicked( 2 ) )
+                            if( IsMouseClicked( ImGuiMouseButton_Middle ) )
                             {
                                 ZoomToZone( *zoneFree );
                             }

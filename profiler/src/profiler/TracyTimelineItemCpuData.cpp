@@ -68,20 +68,14 @@ void TimelineItemCpuData::Preprocess( const TimelineContext& ctx, TaskDispatch& 
     bool hasCpuData = false;
     auto pos = yPos + ostep;
 
-#ifdef TRACY_NO_STATISTICS
-    if( m_view.GetViewData().drawCpuUsageGraph )
-#else
     if( m_view.GetViewData().drawCpuUsageGraph && m_worker.IsCpuUsageReady() )
-#endif
     {
-#ifndef TRACY_NO_STATISTICS
         auto& ctxUsage = m_worker.GetCpuUsage();
         if( !ctxUsage.empty() )
         {
             hasCpuData = true;
         }
         else
-#endif
         {
             const auto cpuDataCount = m_worker.GetCpuDataCpuCount();
             const auto cpuData = m_worker.GetCpuData();
@@ -96,7 +90,7 @@ void TimelineItemCpuData::Preprocess( const TimelineContext& ctx, TaskDispatch& 
         }
         if( hasCpuData )
         {
-            const auto cpuUsageHeight = floor( 30.f * GetScale() );
+            const auto cpuUsageHeight = floor( 30.f * ctx.scale );
             if( pos <= yMax && pos + cpuUsageHeight + 3 >= yMin )
             {
                 td.Queue( [this, &ctx] {
@@ -138,7 +132,7 @@ void TimelineItemCpuData::PreprocessCpuCtxSwitches( const TimelineContext& ctx, 
     auto eit = std::lower_bound( it, cs.end(), vEnd, [] ( const auto& l, const auto& r ) { return l.Start() < r; } );
     if( it == eit ) return;
 
-    const auto MinVisNs = int64_t( round( GetScale() * MinVisSize * nspx ) );
+    const auto MinVisNs = int64_t( round( ctx.scale * MinVisSize * nspx ) );
 
     while( it < eit )
     {
@@ -180,7 +174,6 @@ void TimelineItemCpuData::PreprocessCpuUsage( const TimelineContext& ctx )
 
     const auto lastTime = m_worker.GetLastTime();
 
-#ifndef TRACY_NO_STATISTICS
     auto& ctxUsage = m_worker.GetCpuUsage();
     if( !ctxUsage.empty() )
     {
@@ -212,7 +205,6 @@ void TimelineItemCpuData::PreprocessCpuUsage( const TimelineContext& ctx )
         }
     }
     else
-#endif
     {
         m_cpuDraw.resize( num );
         memset( m_cpuDraw.data(), 0, sizeof( CpuUsageDraw ) * num );

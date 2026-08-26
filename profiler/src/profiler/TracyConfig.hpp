@@ -44,12 +44,13 @@ struct Config
     std::string llmSearchIdentifier;
     std::string llmSearchApiKey;
     std::string llmSearchBraveApiKey;
-    bool llmSeparateFastModel = true;
+    bool llmSeparateFastModel = false;
     bool llmAnnotateCallstacks = false;
     bool llmLimitToolReplySize = false;
     int llmMaxToolReplySizeValue = 48*1024;
     bool llmSummary = true;
     bool llmSuggestion = true;
+    int llmPersonality = 0;
 };
 
 extern Config s_config;

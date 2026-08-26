@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "TracyAssert.hpp"
 #include "TracyTaggedUserlandAddress.hpp"
 #include "TracyForceInline.hpp"
 
@@ -83,6 +84,9 @@ enum class QueueType : uint8_t
     SourceCodeMetadata,
     FiberEnter,
     FiberLeave,
+    SectionEnter,
+    SectionLeave,
+    SectionSetup,
     Terminate,
     KeepAlive,
     ThreadContext,
@@ -125,6 +129,8 @@ enum class QueueType : uint8_t
     CpuTopology,
     SingleStringData,
     SecondStringData,
+    SingleStringData8,
+    SecondStringData8,
     MemNamePayload,
     ThreadGroupHint,
     GpuZoneAnnotation,
@@ -310,6 +316,36 @@ struct QueueFiberLeave
     uint32_t thread;
 };
 
+struct QueueSectionEnter
+{
+    int64_t time;
+    uint32_t id;
+    uint16_t category;
+};
+
+struct QueueSectionEnterFat : public QueueSectionEnter
+{
+    uint64_t text;      // ptr
+    uint16_t size;
+};
+
+struct QueueSectionLeave
+{
+    int64_t time;
+    uint32_t id;
+};
+
+struct QueueSectionSetup
+{
+    uint16_t category;
+};
+
+struct QueueSectionSetupFat : public QueueSectionSetup
+{
+    uint64_t text;      // ptr
+    uint16_t size;
+};
+
 struct QueueLockTerminate
 {
     uint32_t id;
@@ -393,7 +429,7 @@ enum class MessageSeverity : uint8_t
     Debug,   // Describes variable states and details about specific internal events in the software, that are useful for investigations.
     Info,    // Describes normal events, which inform on the expected progress and state of your software.
     Warning, // Describes potentially dangerous situations caused by unexpected events and states.
-    Error,   // Describes the occurance of unexpected behavior. Does not interrupt the execution of the software.
+    Error,   // Describes the occurrence of unexpected behavior. Does not interrupt the execution of the software.
     Fatal,   // Describes a critical event that will lead to a software failure/crash.
     COUNT
 };
@@ -407,13 +443,13 @@ tracy_force_inline uint8_t MakeMessageMetadata(MessageSourceType source, Message
 
 tracy_force_inline MessageSourceType MessageSourceFromMetadata(uint8_t metadata)
 {
-    assert( ( metadata & 0x0F ) < (uint8_t)MessageSourceType::COUNT );
+    TRACY_ASSERT( ( metadata & 0x0F ) < (uint8_t)MessageSourceType::COUNT );
     return (MessageSourceType)( metadata & 0x0F );
 }
 
 tracy_force_inline MessageSeverity MessageSeverityFromMetadata(uint8_t metadata)
 {
-    assert( ( ( metadata & 0xF0 ) >> 4 ) < (uint8_t)MessageSeverity::COUNT );
+    TRACY_ASSERT( ( ( metadata & 0xF0 ) >> 4 ) < (uint8_t)MessageSeverity::COUNT );
     return (MessageSeverity)( ( metadata & 0xF0 ) >> 4 );
 }
 
@@ -496,6 +532,7 @@ enum class GpuContextType : uint8_t
     Custom,
     CUDA,
     Rocprof,
+    WebGPU,
     tt_device
 };
 
@@ -503,6 +540,8 @@ enum GpuContextFlags : uint8_t
 {
     GpuContextCalibration   = 1 << 0
 };
+
+constexpr int32_t InvalidGpuContextId = -1;
 
 struct QueueGpuNewContext
 {
@@ -811,7 +850,7 @@ struct QueueParamSetup
 {
     uint32_t idx;
     uint64_t name;      // ptr
-    uint8_t isBool;
+    uint8_t type;
     int32_t val;
 };
 
@@ -957,6 +996,11 @@ struct QueueItem
         QueueSourceCodeNotAvailable sourceCodeNotAvailable;
         QueueFiberEnter fiberEnter;
         QueueFiberLeave fiberLeave;
+        QueueSectionEnter sectionEnter;
+        QueueSectionEnterFat sectionEnterFat;
+        QueueSectionLeave sectionLeave;
+        QueueSectionSetup sectionSetup;
+        QueueSectionSetupFat sectionSetupFat;
         QueueGpuZoneAnnotation zoneAnnotation;
         QueueGpuMarker gpuMarker;
         QueueGpuMarkerMeta gpuMarkerMeta;
@@ -1042,6 +1086,9 @@ static constexpr size_t QueueDataSize[] = {
     sizeof( QueueHeader ),                                  // SourceCodeMetadata - not for wire transfer
     sizeof( QueueHeader ) + sizeof( QueueFiberEnter ),
     sizeof( QueueHeader ) + sizeof( QueueFiberLeave ),
+    sizeof( QueueHeader ) + sizeof( QueueSectionEnter ),
+    sizeof( QueueHeader ) + sizeof( QueueSectionLeave ),
+    sizeof( QueueHeader ) + sizeof( QueueSectionSetup ),
     // above items must be first
     sizeof( QueueHeader ),                                  // terminate
     sizeof( QueueHeader ),                                  // keep alive
@@ -1085,6 +1132,8 @@ static constexpr size_t QueueDataSize[] = {
     sizeof( QueueHeader ) + sizeof( QueueCpuTopology ),
     sizeof( QueueHeader ),                                  // single string data
     sizeof( QueueHeader ),                                  // second string data
+    sizeof( QueueHeader ),                                  // single string data, 8 bit length
+    sizeof( QueueHeader ),                                  // second string data, 8 bit length
     sizeof( QueueHeader ) + sizeof( QueueMemNamePayload ),
     sizeof( QueueHeader ) + sizeof( QueueThreadGroupHint ),
     sizeof( QueueHeader ) + sizeof( QueueGpuZoneAnnotation ), // GPU zone annotation

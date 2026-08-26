@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <curl/curl.h>
+#include <inttypes.h>
 #include <nlohmann/json.hpp>
 #include <libbase64.h>
 #include <pugixml.hpp>
@@ -105,7 +106,6 @@ TracyLlmTools::TracyLlmTools( Worker& worker, const View& view, const TracyManua
         for( auto& line : SplitLines( chunk.text.c_str(), chunk.text.size() ) )
         {
             if( line.empty() ) continue;
-            if( line == "---" || line == ":::" || line == "::: bclogo" ) continue;
             m_chunkData.emplace_back( hdr + line, idx );
         }
         idx++;
@@ -198,12 +198,16 @@ std::string TracyLlmTools::HandleToolCalls( const std::string& tool, const nlohm
         {
             return SymbolDisasm( Param( "address" ) );
         }
-#ifndef TRACY_NO_STATISTICS
         else if( tool == "symbol_parents" )
         {
-            return SymbolParents( Param( "address" ), ParamOptU32( "limit", 10 ) );
+            std::string mode = "reached";
+            return SymbolParents( Param( "address" ), ParamOptU32( "limit", 10 ), ParamOptString( "mode", mode ) );
         }
-#endif
+        else if( tool == "sampling_stats" )
+        {
+            std::string empty;
+            return SamplingStats( ParamOptString( "query", empty ), ParamOptU32( "limit", 30 ) );
+        }
         return "Unknown tool call: " + tool;
     }
     catch( const std::exception& e )
@@ -372,11 +376,9 @@ int TracyLlmTools::CalcCtxBasedLimit( int ctxSize )
 
 int TracyLlmTools::CalcMaxSize() const
 {
-    constexpr int defaultLimit = 48*1024;
-    const int limit = s_config.llmLimitToolReplySize ? s_config.llmMaxToolReplySizeValue : defaultLimit;
+    if( s_config.llmLimitToolReplySize ) return s_config.llmMaxToolReplySizeValue;
     const int ctxLimit = CalcCtxBasedLimit( m_ctxSize );
-    if( ctxLimit <= 0 ) return limit;
-    return std::min( ctxLimit, limit );
+    return ctxLimit > 0 ? ctxLimit : DefaultToolReplyLimit;
 }
 
 std::string TracyLlmTools::TrimString( std::string&& str ) const
@@ -872,6 +874,7 @@ std::string TracyLlmTools::SourceFile( const std::string& file, uint32_t line, u
 {
     if( line == 0 ) return "Error: Source file line number must be greater than 0.";
 
+    std::lock_guard<std::mutex> lock( m_worker.GetDataLock() );
     const auto data = m_worker.GetSourceFileFromCache( file.c_str() );
     if( data.data == nullptr ) return "Error: Source file not available.";
 
@@ -921,6 +924,7 @@ std::string TracyLlmTools::SourceFile( const std::string& file, uint32_t line, u
 
 std::string TracyLlmTools::SourceSearch( std::string query, bool caseInsensitive, const std::string& path ) const
 {
+    std::lock_guard<std::mutex> lock( m_worker.GetDataLock() );
     auto& cache = m_worker.GetSourceFileCache();
     nlohmann::json json = {
         { "hint", "Each line starts with a line number, then ':', then the actual line content." }
@@ -1033,50 +1037,76 @@ std::string TracyLlmTools::GetSkill( const std::string& name ) const
 
 std::string TracyLlmTools::SymbolDisasm( const std::string& address ) const
 {
+    if( !m_worker.AreCallstackSamplesReady() || !m_worker.AreSymbolSamplesReady() ) return "Sampling data is not ready yet. Wait for background processing to complete.";
+    std::lock_guard<std::mutex> lock( m_worker.GetDataLock() );
     uint64_t symaddr = strtoull( address.c_str(), nullptr, 16 );
     auto json = JsonDisassembly( symaddr, m_worker, m_view );
-    return json.dump( -1, ' ', false, nlohmann::json::error_handler_t::replace );
+    auto ret = json.dump( -1, ' ', false, nlohmann::json::error_handler_t::replace );
+    if( ret.size() > CalcMaxSize() ) return "Too much data.";
+    return ret;
 }
 
-#ifndef TRACY_NO_STATISTICS
-std::string TracyLlmTools::SymbolParents( const std::string& address, uint32_t limit ) const
+std::string TracyLlmTools::SymbolParents( const std::string& address, uint32_t limit, const std::string& mode ) const
 {
+    if( !m_worker.AreCallstackSamplesReady() ) return "Sampling data is not ready yet. Wait for background processing to complete.";
+
+    int statMode;
+    if( mode == "reached" ) statMode = 1;
+    else if( mode == "reached_recursive" ) statMode = 2;
+    else if( mode == "executing" ) statMode = 0;
+    else return "Unknown mode: " + mode;
+
+    std::lock_guard<std::mutex> lock( m_worker.GetDataLock() );
     uint64_t symAddr = strtoull( address.c_str(), nullptr, 16 );
     auto ss = m_worker.GetSymbolStats( symAddr );
     if( !ss ) return "No parent callstack data for this symbol.";
 
     const auto symbol = m_worker.GetSymbolData( symAddr );
     if( !symbol ) return "Symbol not found.";
-    if( symbol->isInline ) return "Symbol is inline.";
 
-    auto stats = ss->parents;
-    auto excl = ss->excl;
-
-    const auto symLen = symbol->size.Val();
-    auto inSym = m_worker.GetInlineSymbolList( symAddr, symLen );
-    if( inSym )
+    unordered_flat_map<uint32_t, uint32_t> stats;
+    uint64_t total = 0;
+    if( statMode == 0 )
     {
-        const auto symEnd = symAddr + symLen;
-        while( *inSym < symEnd )
+        stats = ss->wasExecuting;
+        total = ss->excl;
+        if( !symbol->isInline )
         {
-            auto istat = m_worker.GetSymbolStats( *inSym++ );
-            if( !istat ) continue;
-            excl += istat->excl;
-            for( auto& v : istat->baseParents )
+            const auto symLen = symbol->size.Val();
+            auto inSym = m_worker.GetInlineSymbolList( symAddr, symLen );
+            if( inSym )
             {
-                auto it = stats.find( v.first );
-                if( it == stats.end() )
+                const auto symEnd = symAddr + symLen;
+                while( *inSym < symEnd )
                 {
-                    stats[v.first] = v.second;
-                }
-                else
-                {
-                    it->second += v.second;
+                    auto istat = m_worker.GetSymbolStats( *inSym++ );
+                    if( !istat ) continue;
+                    total += istat->excl;
+                    for( auto& v : istat->wasExecutingBase )
+                    {
+                        auto it = stats.find( v.first );
+                        if( it == stats.end() )
+                        {
+                            stats[v.first] = v.second;
+                        }
+                        else
+                        {
+                            it->second += v.second;
+                        }
+                    }
                 }
             }
         }
+        if( stats.empty() ) return "The symbol was never sampled while it was executing. Use the \"reached\" mode to see the stacks through which it was present deeper on the call stack.";
     }
-    if( stats.empty() ) return "No parent callstack data for this symbol.";
+    else
+    {
+        // A base symbol is always present as the last frame of any frame group containing
+        // its inline functions, so the wasReached maps already cover the whole symbol.
+        stats = statMode == 1 ? ss->wasReachedNonReentrant : ss->wasReached;
+        for( auto& v : stats ) total += v.second;
+        if( stats.empty() ) return "No parent callstack data for this symbol.";
+    }
 
     std::vector<decltype(stats.begin())> sorted;
     sorted.reserve( stats.size() );
@@ -1085,6 +1115,7 @@ std::string TracyLlmTools::SymbolParents( const std::string& address, uint32_t l
     if( sorted.size() > limit ) sorted.resize( limit );
 
     nlohmann::json result = {
+        { "mode", mode },
         { "entries", nlohmann::json::array() },
         { "hint", "Frame N is where frame N-1 returns to. The caller of frame N-1 may differ from frame N." }
     };
@@ -1092,11 +1123,11 @@ std::string TracyLlmTools::SymbolParents( const std::string& address, uint32_t l
 
     for( auto& entry : sorted )
     {
-        auto& cs = m_worker.GetParentCallstack( entry->first );
+        auto& cs = m_worker.GetSyntheticCallstack( entry->first );
         auto frames = m_view.GetCallstackJson( cs.data(), cs.size() )["frames"];
 
         char buf[32];
-        auto end = PrintFloat( buf, buf+32, 100.f * entry->second / excl, 4 );
+        auto end = PrintFloat( buf, buf+32, 100.f * entry->second / total, 4 );
         *end = '\0';
 
         entries.push_back( {
@@ -1106,6 +1137,116 @@ std::string TracyLlmTools::SymbolParents( const std::string& address, uint32_t l
     }
     return result.dump( -1, ' ', false, nlohmann::json::error_handler_t::replace );
 }
-#endif
+
+std::string TracyLlmTools::SamplingStats( const std::string& query, uint32_t limit ) const
+{
+    if( !m_worker.AreCallstackSamplesReady() || !m_worker.AreSymbolSamplesReady() ) return "Sampling data is not ready yet. Wait for background processing to complete.";
+    if( m_worker.GetCallstackSampleCount() == 0 ) return "No call stack samples in this trace.";
+
+    std::lock_guard<std::mutex> lock( m_worker.GetDataLock() );
+
+    std::regex rx;
+    if( !query.empty() )
+    {
+        try
+        {
+            rx = std::regex( query );
+        }
+        catch( const std::regex_error& e )
+        {
+            return "Error: Invalid query regex: " + std::string( e.what() );
+        }
+    }
+
+    const auto& symMap = m_worker.GetSymbolMap();
+    const auto& symStat = m_worker.GetSymbolStats();
+
+    struct SymEntry
+    {
+        uint64_t symAddr;
+        uint32_t excl;
+    };
+
+    std::vector<SymEntry> data;
+    data.reserve( symStat.size() );
+    for( auto& v : symStat )
+    {
+        auto sit = symMap.find( v.first );
+        if( sit == symMap.end() ) continue;
+        data.emplace_back( v.first, v.second.excl );
+    }
+    if( data.empty() ) return "No symbol statistics available.";
+
+    unordered_flat_map<uint64_t, SymEntry> baseMap;
+    for( auto& v : data )
+    {
+        auto sym = m_worker.GetSymbolData( v.symAddr );
+        const auto symAddr = ( sym && sym->isInline ) ? m_worker.GetSymbolForAddress( v.symAddr ) : v.symAddr;
+        auto it = baseMap.find( symAddr );
+        if( it == baseMap.end() )
+        {
+            baseMap.emplace( symAddr, SymEntry { symAddr, v.excl } );
+        }
+        else
+        {
+            assert( symAddr == it->second.symAddr );
+            it->second.excl += v.excl;
+        }
+    }
+
+    data.clear();
+    for( auto& v : baseMap )
+    {
+        auto sit = symMap.find( v.second.symAddr );
+        if( sit == symMap.end() ) continue;
+        if( !query.empty() )
+        {
+            const auto name = m_worker.GetString( sit->second.name );
+            if( !std::regex_search( name, rx ) ) continue;
+        }
+        data.emplace_back( v.second );
+    }
+    if( data.empty() ) return "No symbols match the query.";
+
+    pdqsort_branchless( data.begin(), data.end(), []( const auto& l, const auto& r ) { return l.excl > r.excl; } );
+    if( data.size() > limit ) data.resize( limit );
+
+    const auto period = m_worker.GetSamplingPeriod();
+    const auto cnt = m_worker.GetCallstackSampleCount();
+    const auto ctx = m_worker.GetContextSwitchSampleCount();
+    const auto totalSamples = cnt > ctx ? cnt - ctx : 0;
+
+    nlohmann::json result = {
+        { "total_time", TimeToString( totalSamples * period ) },
+        { "entries", nlohmann::json::array() },
+        { "hint", "Entries are sorted by exclusive time (child time not included), highest first." }
+    };
+    auto& entries = result["entries"];
+
+    for( auto& v : data )
+    {
+        auto sit = symMap.find( v.symAddr );
+        assert( sit != symMap.end() );
+
+        char addr[32];
+        snprintf( addr, sizeof( addr ), "0x%" PRIx64, v.symAddr );
+
+        const auto file = m_worker.GetString( sit->second.file );
+        char loc[1024];
+        snprintf( loc, sizeof( loc ), "%s:%u", file, sit->second.line );
+
+        entries.push_back( {
+            { "name", m_worker.GetString( sit->second.name ) },
+            { "address", addr },
+            { "location", loc },
+            { "image", m_worker.GetString( sit->second.imageName ) },
+            { "time", TimeToString( v.excl * period ) },
+            { "code_size", MemSizeToString( sit->second.size.Val() ) },
+            { "external", m_worker.IsFrameExternal( sit->second.file, sit->second.imageName ) }
+        } );
+    }
+
+    return result.dump( -1, ' ', false, nlohmann::json::error_handler_t::replace );
+}
 
 }

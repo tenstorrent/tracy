@@ -66,7 +66,7 @@ class StringIdx
 {
 public:
     tracy_force_inline StringIdx() { memset( m_idx, 0, sizeof( m_idx ) ); }
-    tracy_force_inline StringIdx( uint32_t idx )
+    tracy_force_inline explicit StringIdx( uint32_t idx )
     {
         SetIdx( idx );
     }
@@ -97,6 +97,8 @@ public:
         uint32_t zero = 0;
         return memcmp( m_idx, &zero, 3 ) != 0;
     }
+
+    tracy_force_inline bool operator==( const StringIdx& rhs ) const { return memcmp( m_idx, rhs.m_idx, 3 ) == 0; }
 
 private:
     uint8_t m_idx[3];
@@ -484,6 +486,7 @@ struct MemCallstackFrameTree
     uint32_t count;
     unordered_flat_map<uint64_t, MemCallstackFrameTree> children;
     unordered_flat_set<uint32_t> callstacks;
+    unordered_flat_set<uint64_t> group;
 };
 
 
@@ -494,6 +497,7 @@ struct CallstackFrameTree
     CallstackFrameId frame;
     uint32_t count;
     unordered_flat_map<uint64_t, CallstackFrameTree> children;
+    unordered_flat_set<uint64_t> group;
 };
 
 
@@ -570,6 +574,7 @@ struct ContextSwitchData
     tracy_force_inline int64_t End() const { return _end.Val(); }
     tracy_force_inline void SetEnd( int64_t end ) { assert( end < (int64_t)( 1ull << 47 ) ); _end = end; }
     tracy_force_inline bool IsEndValid() const { return _end.IsNonNegative(); }
+    tracy_force_inline int64_t EndOrStart() const { return _end.IsNonNegative() ? _end.Val() : _start.Val(); }
     tracy_force_inline uint8_t Cpu() const { return _cpu; }
     tracy_force_inline void SetCpu( uint8_t cpu ) { _cpu = cpu; }
     tracy_force_inline uint8_t WakeupCpu() const { return _wakeupcpu; }
@@ -680,6 +685,15 @@ struct ChildSample
     uint64_t addr;
 };
 
+struct ChildSampleSort { bool operator()( const ChildSample& lhs, const ChildSample& rhs ) const { return lhs.time.Val() < rhs.time.Val(); }; };
+
+
+struct SectionItem
+{
+    Int48 start, end;
+    StringIdx text;
+};
+
 #pragma pack( pop )
 
 
@@ -700,7 +714,7 @@ struct ThreadData
 #endif
     Vector<SampleData> samples;
     SampleData pendingSample;
-    Vector<SampleData> ctxSwitchSamples;
+    SortedVector<SampleData, SampleDataSort> ctxSwitchSamples;
     uint64_t kernelSampleCnt;
     uint8_t isFiber;
     ThreadData* fiber;
@@ -860,11 +874,18 @@ struct CpuThreadData
 };
 
 
+enum class ParameterType
+{
+    Integer,
+    Boolean,
+    Trigger
+};
+
 struct Parameter
 {
     uint32_t idx;
     StringRef name;
-    bool isBool;
+    ParameterType type;
     int32_t val;
 };
 
@@ -872,8 +893,10 @@ struct Parameter
 struct SymbolStats
 {
     uint32_t incl, excl;
-    unordered_flat_map<uint32_t, uint32_t> parents;
-    unordered_flat_map<uint32_t, uint32_t> baseParents;
+    unordered_flat_map<uint32_t, uint32_t> wasExecuting;
+    unordered_flat_map<uint32_t, uint32_t> wasExecutingBase;
+    unordered_flat_map<uint32_t, uint32_t> wasReached;
+    unordered_flat_map<uint32_t, uint32_t> wasReachedNonReentrant;
 };
 
 

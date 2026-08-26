@@ -1,6 +1,17 @@
 #ifndef __TRACYMANGLE_HPP__
 #define __TRACYMANGLE_HPP__
 
+// TRACY_DELAYED_INIT is an internal implementation switch, not a user-facing
+// option: Apple platforms require it, and TRACY_MANUAL_LIFETIME builds on top
+// of it. It is derived here so that every translation unit, and the client
+// implementation, see the same effective value before any config-dependent
+// symbol name is computed.
+#if defined(TRACY_MANUAL_LIFETIME) || defined(__APPLE__)
+#  ifndef TRACY_DELAYED_INIT
+#    define TRACY_DELAYED_INIT
+#  endif
+#endif
+
 #ifdef TRACY_ENABLE
 #define TRACY_ENABLE_MANGLE _E1
 #else
@@ -43,8 +54,14 @@
 #define TRACY_TIMER_FALLBACK_MANGLE _TF0
 #endif
 
+#ifdef TRACY_PLATFORM_HEADER
+#define TRACY_PLATFORM_HEADER_MANGLE _PH1
+#else
+#define TRACY_PLATFORM_HEADER_MANGLE _PH0
+#endif
+
 #define MANGLED_NAME_BASED_ON_CONFIG(base) \
-    TracyConcat(TracyConcat(TracyConcat(TracyConcat(TracyConcat(TracyConcat(TracyConcat( \
+    TracyConcat(TracyConcat(TracyConcat(TracyConcat(TracyConcat(TracyConcat(TracyConcat(TracyConcat( \
     base##_CFG, \
     TRACY_ENABLE_MANGLE), \
     TRACY_ON_DEMAND_MANGLE), \
@@ -52,6 +69,7 @@
     TRACY_MANUAL_LIFETIME_MANGLE), \
     TRACY_FIBERS_MANGLE), \
     TRACY_DISALLOW_HW_TIMER_MANGLE), \
-    TRACY_TIMER_FALLBACK_MANGLE)
+    TRACY_TIMER_FALLBACK_MANGLE), \
+    TRACY_PLATFORM_HEADER_MANGLE)
 
 #endif // __TRACYMANGLE_HPP__

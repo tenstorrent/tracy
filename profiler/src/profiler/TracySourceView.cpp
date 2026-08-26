@@ -4,7 +4,7 @@
 #include <sstream>
 #include <stdio.h>
 
-#include "imgui.h"
+#include "imgui_internal.h"
 #include "TracyCharUtil.hpp"
 #include "TracyColor.hpp"
 #include "TracyConfig.hpp"
@@ -20,7 +20,7 @@
 #include "tracy_pdqsort.h"
 #include "../Fonts.hpp"
 
-#include "IconsFontAwesome6.h"
+#include "IconsFontAwesome7.h"
 
 namespace tracy
 {
@@ -261,7 +261,7 @@ SourceView::SourceView()
     , m_asmBytes( false )
     , m_asmShowSourceLocation( true )
     , m_calcInlineStats( true )
-    , m_hwSamples( true )
+    , m_hwSamples( false )
     , m_hwSamplesRelative( true )
     , m_childCalls( false )
     , m_childCallList( false )
@@ -565,7 +565,7 @@ bool SourceView::Disassemble( uint64_t symAddr, const Worker& worker )
     return !m_asm.empty();
 }
 
-void SourceView::Render( Worker& worker, View& view )
+void SourceView::Render( Worker& worker, View& view, WindowConstraints& constraints )
 {
     m_highlightAddr.Decay( 0 );
     m_hoveredLine.Decay( 0 );
@@ -608,6 +608,7 @@ void SourceView::Render( Worker& worker, View& view )
             TextColoredUnformatted( ImVec4( 0.4f, 0.8f, 0.4f, 1.f ), ICON_FA_DATABASE );
             ImGui::SameLine();
             ImGui::TextUnformatted( "Source file cached during profiling run" );
+            constraints.MarkMinWidth();
         }
         else
         {
@@ -616,13 +617,14 @@ void SourceView::Render( Worker& worker, View& view )
             TextColoredUnformatted( ImVec4( 1.f, 0.3f, 0.3f, 1.f ), "The source file contents might not reflect the actual profiled code!" );
             ImGui::SameLine();
             TextColoredUnformatted( ImVec4( 1.f, 1.f, 0.2f, 1.f ), ICON_FA_TRIANGLE_EXCLAMATION );
+            constraints.MarkMinWidth();
         }
 
         RenderSimpleSourceView();
     }
     else
     {
-        RenderSymbolView( worker, view );
+        RenderSymbolView( worker, view, constraints );
     }
 }
 
@@ -678,7 +680,7 @@ void SourceView::RenderSimpleSourceView()
     ImGui::EndChild();
 }
 
-void SourceView::RenderSymbolView( Worker& worker, View& view )
+void SourceView::RenderSymbolView( Worker& worker, View& view, WindowConstraints& constraints )
 {
     assert( m_symAddr != 0 );
 
@@ -761,9 +763,16 @@ void SourceView::RenderSymbolView( Worker& worker, View& view )
             ImGui::TextDisabled( "(+%s inlined functions)", RealToString( inlineCount ) );
         }
     }
-    ImGui::SameLine();
-    ImGui::AlignTextToFramePadding();
-    if( ImGui::SmallButton( ICON_FA_ARROW_DOWN_SHORT_WIDE " Entry stacks" ) ) view.ShowSampleParents( m_symAddr, !m_calcInlineStats );
+    if( worker.AreCallstackSamplesReady() )
+    {
+        const auto stats = worker.GetSymbolStats( m_symAddr );
+        if( stats && !stats->wasReached.empty() && worker.GetSymbolData( m_symAddr ) )
+        {
+            ImGui::SameLine();
+            ImGui::AlignTextToFramePadding();
+            if( ImGui::SmallButton( ICON_FA_ARROW_DOWN_SHORT_WIDE " Entry stacks" ) ) view.ShowSampleParents( m_symAddr, !m_calcInlineStats );
+        }
+    }
     if( inlineList )
     {
         if( m_calcInlineStats )
@@ -790,7 +799,8 @@ void SourceView::RenderSymbolView( Worker& worker, View& view )
         if( ImGui::IsKeyDown( ImGuiKey_X ) ) m_propagateInlines = !m_propagateInlines;
     }
 
-    const bool limitView = view.m_statRange.active;
+    auto& range = view.GetRange( RangeId::Statistics );
+    const bool limitView = range.active;
     if( inlineList )
     {
         if( SmallCheckbox( ICON_FA_SITEMAP " Function:", &m_calcInlineStats ) )
@@ -875,7 +885,7 @@ void SourceView::RenderSymbolView( Worker& worker, View& view )
                     widthSet = true;
                     const auto w = ImGui::GetWindowWidth();
                     const auto c0 = ImGui::CalcTextSize( "12345678901234567890" ).x;
-                    const auto c2 = ImGui::CalcTextSize( "0xeeeeeeeeeeeeee" ).x;
+                    const auto c2 = ImGui::CalcTextSize( "0x0123456789abcdef" ).x;
                     ImGui::SetColumnWidth( 0, c0 );
                     ImGui::SetColumnWidth( 1, w - c0 - c2 );
                     ImGui::SetColumnWidth( 2, c2 );
@@ -918,7 +928,14 @@ void SourceView::RenderSymbolView( Worker& worker, View& view )
                 const auto normalized = shortenName != ShortenName::Never ? ShortenZoneName( ShortenName::OnlyNormalize, symName ) : symName;
                 const auto selected = ImGui::Selectable( "", v.first == m_symAddr, ImGuiSelectableFlags_SpanAllColumns );
                 ImGui::SameLine( 0, 0 );
-                ImGui::TextUnformatted( normalized );
+                if( worker.IsFrameExternal( isym->file, isym->imageName ) )
+                {
+                    TextDisabledUnformatted( normalized );
+                }
+                else
+                {
+                    ImGui::TextUnformatted( normalized );
+                }
                 TooltipNormalizedName( symName, normalized );
                 if( selected )
                 {
@@ -1002,6 +1019,10 @@ void SourceView::RenderSymbolView( Worker& worker, View& view )
     {
         GatherIpHwStats( as, worker, view, m_cost );
     }
+    // The local and ext maxima can occur on different addresses, so the maximum of the
+    // sums has to be tracked separately for the child calls display.
+    for( auto& v : as.ipCountSrc ) as.ipMaxSrcSum = std::max( as.ipMaxSrcSum, v.second.local + v.second.ext );
+    for( auto& v : as.ipCountAsm ) as.ipMaxAsmSum = std::max( as.ipMaxAsmSum, v.second.local + v.second.ext );
     if( !m_calcInlineStats )
     {
         as.ipTotalSrc = as.ipTotalAsm;
@@ -1011,7 +1032,7 @@ void SourceView::RenderSymbolView( Worker& worker, View& view )
         CountHwStats( as, worker, view );
     }
     const auto samplesReady = worker.AreSymbolSamplesReady();
-    if( ( as.ipTotalAsm.local + as.ipTotalAsm.ext ) > 0 || ( view.m_statRange.active && worker.GetSamplesForSymbol( m_baseAddr ) ) )
+    if( ( as.ipTotalAsm.local + as.ipTotalAsm.ext ) > 0 || ( range.active && samplesReady && worker.GetSamplesForSymbol( m_baseAddr ) ) )
     {
         ImGui::SameLine();
         ImGui::Spacing();
@@ -1020,7 +1041,9 @@ void SourceView::RenderSymbolView( Worker& worker, View& view )
         {
             SmallCheckbox( ICON_FA_HAMMER " HW", &m_hwSamples );
             ImGui::SameLine();
+            if( !m_hwSamples ) ImGui::BeginDisabled();
             SmallCheckbox( ICON_FA_CAR_BURST " Impact", &m_hwSamplesRelative );
+            if( !m_hwSamples ) ImGui::EndDisabled();
             ImGui::SameLine();
             ImGui::Spacing();
             ImGui::SameLine();
@@ -1066,8 +1089,8 @@ void SourceView::RenderSymbolView( Worker& worker, View& view )
                 ImGui::PushStyleVar( ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f );
                 m_childCalls = false;
                 m_childCallList = false;
-                m_propagateInlines = false;
             }
+            if( !samplesReady ) m_propagateInlines = false;
             SmallCheckbox( ICON_FA_RIGHT_FROM_BRACKET " Child calls", &m_childCalls );
             if( !samplesReady )
             {
@@ -1132,7 +1155,7 @@ void SourceView::RenderSymbolView( Worker& worker, View& view )
         ImGui::SameLine();
         if( !worker.AreSymbolSamplesReady() )
         {
-            view.m_statRange.active = false;
+            range.active = false;
             bool val = false;
             ImGui::PushItemFlag( ImGuiItemFlags_Disabled, true );
             ImGui::PushStyleVar( ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f );
@@ -1143,16 +1166,16 @@ void SourceView::RenderSymbolView( Worker& worker, View& view )
         }
         else
         {
-            if( ImGui::Checkbox( "Limit range", &view.m_statRange.active ) )
+            if( ImGui::Checkbox( "Limit range", &range.active ) )
             {
-                if( view.m_statRange.active && view.m_statRange.min == 0 && view.m_statRange.max == 0 )
+                if( range.active && range.min == 0 && range.max == 0 )
                 {
                     const auto& vd = view.GetViewData();
-                    view.m_statRange.min = vd.zvStart;
-                    view.m_statRange.max = vd.zvEnd;
+                    range.min = vd.zvStart;
+                    range.max = vd.zvEnd;
                 }
             }
-            if( view.m_statRange.active )
+            if( range.active )
             {
                 ImGui::SameLine();
                 TextColoredUnformatted( 0xFF00FFFF, ICON_FA_TRIANGLE_EXCLAMATION );
@@ -1165,6 +1188,7 @@ void SourceView::RenderSymbolView( Worker& worker, View& view )
     {
         m_cost = CostType::SampleCount;
     }
+    constraints.MarkMinWidth();
 
     ImGui::PopStyleVar();
     ImGui::Separator();
@@ -1188,6 +1212,11 @@ void SourceView::RenderSymbolView( Worker& worker, View& view )
             vec.reserve( map.size() );
             for( auto& v : map ) vec.emplace_back( ChildStat { v.first, v.second } );
             pdqsort_branchless( vec.begin(), vec.end(), []( const auto& lhs, const auto& rhs ) { return lhs.count > rhs.count; } );
+
+            ImGuiContext& g = *GImGui;
+            g.NextWindowData.HasFlags |= ImGuiNextWindowDataFlags_HasWindowFlags;
+            g.NextWindowData.WindowFlags = ImGuiWindowFlags_AlwaysVerticalScrollbar;
+
             if( ImGui::BeginTable( "##ccd", 7, ImGuiTableFlags_Resizable | ImGuiTableFlags_Reorderable | ImGuiTableFlags_Hideable | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY ) )
             {
                 ImGui::TableSetupScrollFreeze( 0, 1 );
@@ -1261,7 +1290,7 @@ void SourceView::RenderSymbolView( Worker& worker, View& view )
                                 UnsetFont();
                                 ImGui::EndTooltip();
                             }
-                            if( ImGui::IsMouseClicked( 1 ) )
+                            if( ImGui::IsMouseClicked( ImGuiMouseButton_Right ) )
                             {
                                 OpenSymbol( fileName, sd->line, v.addr, v.addr, worker, view );
                             }
@@ -1428,7 +1457,7 @@ static uint32_t GetGoodnessColor( float inRatio )
 void SourceView::RenderSymbolSourceView( const AddrStatData& as, Worker& worker, View& view, bool hasInlines )
 {
     const auto scale = GetScale();
-    if( hasInlines && !m_calcInlineStats && ( ( as.ipTotalAsm.local + as.ipTotalAsm.ext ) > 0 || ( view.m_statRange.active && worker.GetSamplesForSymbol( m_baseAddr ) ) ) )
+    if( hasInlines && !m_calcInlineStats && ( ( as.ipTotalAsm.local + as.ipTotalAsm.ext ) > 0 || ( view.GetRange( RangeId::Statistics ).active && worker.AreSymbolSamplesReady() && worker.GetSamplesForSymbol( m_baseAddr ) ) ) )
     {
         const auto samplesReady = worker.AreSymbolSamplesReady();
         if( !samplesReady )
@@ -1812,30 +1841,43 @@ void SourceView::RenderSymbolSourceView( const AddrStatData& as, Worker& worker,
         }
         pdqsort_branchless( ipData.begin(), ipData.end(), []( const auto& l, const auto& r ) { return l.first < r.first; } );
 
-        const auto step = uint32_t( lines.size() * 2 / rect.GetHeight() );
-        const auto x14 = round( rect.Min.x + rect.GetWidth() * 0.4f );
-        const auto x34 = round( rect.Min.x + rect.GetWidth() * 0.6f );
-
-        auto it = ipData.begin();
-        while( it != ipData.end() )
+        const auto bucketHeight = std::max( 1, int( round( 3 * scale ) ) );
+        const auto bucketNum = std::max( 1, int( ceil( rect.GetHeight() / bucketHeight ) ) );
+        std::vector<int64_t> buckets( bucketNum, -1 );
+        for( auto& v : ipData )
         {
-            const auto firstLine = it->first;
-            AddrStat ipSum = {};
-            while( it != ipData.end() && it->first <= firstLine + step )
+            const auto bucketStart = int( float( v.first - 1 ) / lines.size() * bucketNum );
+            auto bucketEnd = int( float( v.first ) / lines.size() * bucketNum );
+            if( bucketEnd == bucketStart ) bucketEnd++;
+            bucketEnd = std::min( bucketEnd, bucketNum - 1 );
+            for( auto idx = bucketStart; idx<bucketEnd; idx++ )
             {
-                ipSum += it->second;
-                ++it;
+                if( m_childCalls )
+                {
+                    buckets[idx] = std::max( buckets[idx], int64_t( v.second.local + v.second.ext ) );
+                }
+                else
+                {
+                    buckets[idx] = std::max( buckets[idx], int64_t( v.second.local ) );
+                }
             }
-            const auto ly = round( rect.Min.y + float( firstLine ) / lines.size() * rect.GetHeight() );
-            if( m_childCalls )
+        }
+
+        const auto gs = 4.f * scale;
+        const auto x40 = round( rect.Min.x + rect.GetWidth() * 0.4f );
+        const auto x60 = round( rect.Min.x + rect.GetWidth() * 0.6f );
+        for( size_t i=0; i<buckets.size(); i++ )
+        {
+            if( buckets[i] < 0 ) continue;
+            const auto y0 = round( rect.Min.y + float( i ) / bucketNum * rect.GetHeight() );
+            const auto y1 = round( rect.Min.y + float( i + 1 ) / bucketNum * rect.GetHeight() );
+            const auto color = buckets[i] == 0 ? 0x22FFFFFF : ( GetHotnessColor( buckets[i], m_childCalls ? as.ipMaxSrcSum : as.ipMaxSrc.local ) );
+            const auto glow = GetHotnessGlow( buckets[i], m_childCalls ? as.ipMaxSrcSum : as.ipMaxSrc.local );
+            draw->AddRectFilled( ImVec2( x40, y0 ), ImVec2( x60, y1 ), color );
+            if( glow )
             {
-                const auto color = ( ipSum.local + ipSum.ext == 0 ) ? 0x22FFFFFF : GetHotnessColor( ipSum.local + ipSum.ext, as.ipMaxSrc.local + as.ipMaxSrc.ext );
-                draw->AddRectFilled( ImVec2( x14, ly ), ImVec2( x34, ly+3*scale ), color );
-            }
-            else
-            {
-                const auto color = ipSum.local == 0 ? 0x22FFFFFF : GetHotnessColor( ipSum.local, as.ipMaxSrc.local );
-                draw->AddRectFilled( ImVec2( x14, ly ), ImVec2( x34, ly+3*scale ), color );
+                draw->AddRectFilledMultiColor( ImVec2( x60, y0 ), ImVec2( x60 + gs, y1 ), glow, 0, 0, glow );
+                draw->AddRectFilledMultiColor( ImVec2( x40 - gs, y0 ), ImVec2( x40, y1 ), 0, glow, glow, 0 );
             }
         }
 
@@ -2041,7 +2083,7 @@ void SourceView::AttachRangeToLlm( size_t start, size_t stop, Worker& worker, Vi
         symName = worker.GetString( sym->name );
     }
 
-    const bool limitView = view.m_statRange.active;
+    const bool limitView = view.GetRange( RangeId::Statistics ).active;
     AddrStatData as;
     if( m_calcInlineStats )
     {
@@ -2405,13 +2447,13 @@ uint64_t SourceView::RenderSymbolAsmView( const AddrStatData& as, Worker& worker
                         }
                         ImGui::EndTooltip();
                         SetFont();
-                        if( ImGui::IsMouseClicked( 0 ) )
+                        if( ImGui::IsMouseClicked( ImGuiMouseButton_Left ) )
                         {
                             m_targetAddr = v.first;
                             m_selectedAddresses.clear();
                             m_selectedAddresses.emplace( v.first );
                         }
-                        else if( ImGui::IsMouseClicked( 1 ) )
+                        else if( ImGui::IsMouseClicked( ImGuiMouseButton_Right ) )
                         {
                             ImGui::OpenPopup( "jumpPopup" );
                             m_jumpPopupAddr = v.first;
@@ -2609,9 +2651,13 @@ uint64_t SourceView::RenderSymbolAsmView( const AddrStatData& as, Worker& worker
                 const auto normalized = view.GetShortenName() != ShortenName::Never ? ShortenZoneName( ShortenName::OnlyNormalize, symName ) : symName;
                 const auto fn = worker.GetString( lcs->data[i].file );
                 const auto srcline = lcs->data[i].line;
+                const auto external = worker.IsFrameExternal( lcs->data[i].file, lcs->imageName );
                 if( srcline != 0 )
                 {
-                    if( ImGui::BeginMenu( normalized ) )
+                    if( external ) ImGui::PushStyleColor( ImGuiCol_Text, ImGui::GetStyle().Colors[ImGuiCol_TextDisabled] );
+                    const auto extend = ImGui::BeginMenu( normalized );
+                    if( external ) ImGui::PopStyleColor();
+                    if( extend )
                     {
                         if( SourceFileValid( fn, worker.GetCaptureTime(), view, worker ) )
                         {
@@ -2651,7 +2697,14 @@ uint64_t SourceView::RenderSymbolAsmView( const AddrStatData& as, Worker& worker
                 }
                 else
                 {
-                    ImGui::TextDisabled( "%s", normalized );
+                    if( external )
+                    {
+                        TextDisabledUnformatted( normalized );
+                    }
+                    else
+                    {
+                        ImGui::TextUnformatted( normalized );
+                    }
                 }
                 ImGui::PopID();
             }
@@ -2737,30 +2790,43 @@ uint64_t SourceView::RenderSymbolAsmView( const AddrStatData& as, Worker& worker
         }
         pdqsort_branchless( ipData.begin(), ipData.end(), []( const auto& l, const auto& r ) { return l.first < r.first; } );
 
-        const auto step = uint32_t( m_asm.size() * 2 / rect.GetHeight() );
+        const auto bucketHeight = std::max( 1, int( round( 3 * scale ) ) );
+        const auto bucketNum = std::max( 1, int( ceil( rect.GetHeight() / bucketHeight ) ) );
+        std::vector<int64_t> buckets( bucketNum, -1 );
+        for( auto& v : ipData )
+        {
+            const auto bucketStart = int( float( v.first ) / m_asm.size() * bucketNum );
+            auto bucketEnd = int( float( v.first + 1 ) / m_asm.size() * bucketNum );
+            if( bucketEnd == bucketStart ) bucketEnd++;
+            bucketEnd = std::min( bucketEnd, bucketNum - 1 );
+            for( auto idx = bucketStart; idx<bucketEnd; idx++ )
+            {
+                if( m_childCalls )
+                {
+                    buckets[idx] = std::max( buckets[idx], int64_t( v.second.local + v.second.ext ) );
+                }
+                else
+                {
+                    buckets[idx] = std::max( buckets[idx], int64_t( v.second.local ) );
+                }
+            }
+        }
+
+        const auto gs = 4.f * scale;
         const auto x40 = round( rect.Min.x + rect.GetWidth() * 0.4f );
         const auto x60 = round( rect.Min.x + rect.GetWidth() * 0.6f );
-
-        auto it = ipData.begin();
-        while( it != ipData.end() )
+        for( size_t i=0; i<buckets.size(); i++ )
         {
-            const auto firstLine = it->first;
-            AddrStat ipSum = {};
-            while( it != ipData.end() && it->first <= firstLine + step )
+            if( buckets[i] <= 0 ) continue;
+            const auto y0 = round( rect.Min.y + float( i ) / bucketNum * rect.GetHeight() );
+            const auto y1 = round( rect.Min.y + float( i + 1 ) / bucketNum * rect.GetHeight() );
+            const auto color = GetHotnessColor( buckets[i], m_childCalls ? as.ipMaxAsmSum : as.ipMaxAsm.local );
+            const auto glow = GetHotnessGlow( buckets[i], m_childCalls ? as.ipMaxAsmSum : as.ipMaxAsm.local );
+            draw->AddRectFilled( ImVec2( x40, y0 ), ImVec2( x60, y1 ), color );
+            if( glow )
             {
-                ipSum += it->second;
-                ++it;
-            }
-            const auto ly = round( rect.Min.y + float( firstLine ) / m_asm.size() * rect.GetHeight() );
-            if( m_childCalls )
-            {
-                const auto color = GetHotnessColor( ipSum.local + ipSum.ext, as.ipMaxAsm.local + as.ipMaxAsm.ext );
-                draw->AddRectFilled( ImVec2( x40, ly ), ImVec2( x60, ly+3*scale ), color );
-            }
-            else if( as.ipMaxAsm.local != 0 )
-            {
-                const auto color = GetHotnessColor( ipSum.local, as.ipMaxAsm.local );
-                draw->AddRectFilled( ImVec2( x40, ly ), ImVec2( x60, ly+3*scale ), color );
+                draw->AddRectFilledMultiColor( ImVec2( x60, y0 ), ImVec2( x60 + gs, y1 ), glow, 0, 0, glow );
+                draw->AddRectFilledMultiColor( ImVec2( x40 - gs, y0 ), ImVec2( x40, y1 ), 0, glow, glow, 0 );
             }
         }
 
@@ -2962,7 +3028,7 @@ void SourceView::RenderLine( const Tokenizer::Line& line, int lineNum, const Add
                         if( hw )
                         {
                             hasHwData = true;
-                            auto& statRange = view->m_statRange;
+                            auto& statRange = view->GetRange( RangeId::Statistics );
                             if( statRange.active )
                             {
                                 hw->sort();
@@ -3062,7 +3128,7 @@ void SourceView::RenderLine( const Tokenizer::Line& line, int lineNum, const Add
                 ImGui::EndTooltip();
                 SetFont();
 
-                if( ImGui::IsMouseClicked( 0 ) )
+                if( ImGui::IsMouseClicked( ImGuiMouseButton_Left ) )
                 {
                     mouseHandled = true;
                     auto& io = ImGui::GetIO();
@@ -3111,7 +3177,7 @@ void SourceView::RenderLine( const Tokenizer::Line& line, int lineNum, const Add
                         m_srcGroupSelect = lineNum;
                     }
                 }
-                else if( ImGui::IsMouseClicked( 1 ) )
+                else if( ImGui::IsMouseClicked( ImGuiMouseButton_Right ) )
                 {
                     mouseHandled = true;
                     m_srcSampleSelect.clear();
@@ -3122,8 +3188,8 @@ void SourceView::RenderLine( const Tokenizer::Line& line, int lineNum, const Add
             uint32_t col, glow;
             if( m_childCalls )
             {
-                col = GetHotnessColor( ipcnt.local + ipcnt.ext, as.ipMaxSrc.local + as.ipMaxSrc.ext );
-                glow = GetHotnessGlow( ipcnt.local + ipcnt.ext, as.ipMaxSrc.local + as.ipMaxSrc.ext );
+                col = GetHotnessColor( ipcnt.local + ipcnt.ext, as.ipMaxSrcSum );
+                glow = GetHotnessGlow( ipcnt.local + ipcnt.ext, as.ipMaxSrcSum );
             }
             else
             {
@@ -3133,10 +3199,10 @@ void SourceView::RenderLine( const Tokenizer::Line& line, int lineNum, const Add
             const auto ds = scale * 3;
             if( glow )
             {
-                draw->AddRectFilledMultiColor( dpos + ImVec2( ds * 0.5f, 1 ), dpos + ImVec2( ds * 2.5f, ty-2 ), glow, 0, 0, glow );
-                draw->AddRectFilledMultiColor( dpos + ImVec2( -ds * 2.5f, 1 ), dpos + ImVec2( -ds * 0.5f, ty-2 ), 0, glow, glow, 0 );
+                draw->AddRectFilledMultiColor( wpos + ImVec2( 0.5f + ds * 0.5f, 2 ), wpos + ImVec2( 0.5f + ds * 2.5f, ty-1 ), glow, 0, 0, glow );
+                draw->AddRectFilledMultiColor( wpos + ImVec2( 0.5f - ds * 2.5f, 2 ), wpos + ImVec2( 0.5f - ds * 0.5f, ty-1 ), 0, glow, glow, 0 );
             }
-            DrawLine( draw, dpos + ImVec2( 0, 1 ), dpos + ImVec2( 0, ty-2 ), col, ds );
+            DrawLine( draw, wpos + ImVec2( 0.5f, 2 ), wpos + ImVec2( 0.5f, ty-1 ), col, ds );
         }
         ImGui::SameLine( 0, ty );
     }
@@ -3230,10 +3296,10 @@ void SourceView::RenderLine( const Tokenizer::Line& line, int lineNum, const Add
     if( match > 0 && ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect( wpos, wpos + ImVec2( w, ty ) ) )
     {
         draw->AddRectFilled( wpos + ImVec2( 0, 1 ), wpos + ImVec2( w, ty ), 0x11FFFFFF );
-        if( !mouseHandled && ( ImGui::IsMouseClicked( 0 ) || ImGui::IsMouseClicked( 1 ) ) )
+        if( !mouseHandled && ( ImGui::IsMouseClicked( ImGuiMouseButton_Left ) || ImGui::IsMouseClicked( ImGuiMouseButton_Right ) ) )
         {
             m_displayMode = DisplayMixed;
-            SelectLine( lineNum, worker, ImGui::IsMouseClicked( 0 ) );
+            SelectLine( lineNum, worker, ImGui::IsMouseClicked( ImGuiMouseButton_Left ) );
         }
         else
         {
@@ -3295,15 +3361,16 @@ void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const Addr
     size_t cycles = 0, retired = 0, cacheRef = 0, cacheMiss = 0, branchRetired = 0, branchMiss = 0;
     if( hw && ( !m_calcInlineStats || worker.GetInlineSymbolForAddress( line.addr ) == m_symAddr ) )
     {
-        if( view.m_statRange.active )
+        auto& range = view.GetRange( RangeId::Statistics );
+        if( range.active )
         {
             hw->sort();
-            cycles = CountHwSamples( hw->cycles, view.m_statRange );
-            retired = CountHwSamples( hw->retired, view.m_statRange );
-            cacheRef = CountHwSamples( hw->cacheRef, view.m_statRange );
-            cacheMiss = CountHwSamples( hw->cacheMiss, view.m_statRange );
-            branchRetired = CountHwSamples( hw->branchRetired, view.m_statRange );
-            branchMiss = CountHwSamples( hw->branchMiss, view.m_statRange );
+            cycles = CountHwSamples( hw->cycles, range );
+            retired = CountHwSamples( hw->retired, range );
+            cacheRef = CountHwSamples( hw->cacheRef, range );
+            cacheMiss = CountHwSamples( hw->cacheMiss, range );
+            branchRetired = CountHwSamples( hw->branchRetired, range );
+            branchMiss = CountHwSamples( hw->branchMiss, range );
         }
         else
         {
@@ -3403,18 +3470,18 @@ void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const Addr
 
                 if( hw ) PrintHwSampleTooltip( cycles, retired, cacheRef, cacheMiss, branchRetired, branchMiss, false );
 
-                const auto stats = worker.GetSymbolStats( symAddrParents );
-                if( stats && !stats->parents.empty() )
+                const auto stats = worker.AreCallstackSamplesReady() ? worker.GetSymbolStats( symAddrParents ) : nullptr;
+                if( stats && !stats->wasReached.empty() )
                 {
                     ImGui::Separator();
-                    TextFocused( "Entry call stacks:", RealToString( stats->parents.size() ) );
+                    TextFocused( "Entry call stacks:", RealToString( stats->wasReachedNonReentrant.size() ) );
                     ImGui::SameLine();
                     TextDisabledUnformatted( "(middle click to view)" );
                 }
                 ImGui::EndTooltip();
                 SetFont();
 
-                if( ImGui::IsMouseClicked( 0 ) )
+                if( ImGui::IsMouseClicked( ImGuiMouseButton_Left ) )
                 {
                     auto& io = ImGui::GetIO();
                     if( io.KeyCtrl )
@@ -3462,12 +3529,12 @@ void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const Addr
                         m_asmGroupSelect = idx;
                     }
                 }
-                else if( ImGui::IsMouseClicked( 1 ) )
+                else if( ImGui::IsMouseClicked( ImGuiMouseButton_Right ) )
                 {
                     m_asmSampleSelect.clear();
                     m_asmGroupSelect = -1;
                 }
-                else if( stats && !stats->parents.empty() && ImGui::IsMouseClicked( 2 ) )
+                else if( stats && !stats->wasReached.empty() && ImGui::IsMouseClicked( ImGuiMouseButton_Middle ) )
                 {
                     view.ShowSampleParents( symAddrParents, false );
                 }
@@ -3476,8 +3543,8 @@ void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const Addr
             uint32_t col, glow;
             if( m_childCalls )
             {
-                col = GetHotnessColor( ipcnt.local + ipcnt.ext, as.ipMaxAsm.local + as.ipMaxAsm.ext );
-                glow = GetHotnessGlow( ipcnt.local + ipcnt.ext, as.ipMaxAsm.local + as.ipMaxAsm.ext );
+                col = GetHotnessColor( ipcnt.local + ipcnt.ext, as.ipMaxAsmSum );
+                glow = GetHotnessGlow( ipcnt.local + ipcnt.ext, as.ipMaxAsmSum );
             }
             else
             {
@@ -3487,10 +3554,10 @@ void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const Addr
             const auto ds = scale * 3;
             if( glow )
             {
-                draw->AddRectFilledMultiColor( dpos + ImVec2( ds * 0.5f, 1 ), dpos + ImVec2( ds * 2.5f, ty-2 ), glow, 0, 0, glow );
-                draw->AddRectFilledMultiColor( dpos + ImVec2( -ds * 2.5f, 1 ), dpos + ImVec2( -ds * 0.5f, ty-2 ), 0, glow, glow, 0 );
+                draw->AddRectFilledMultiColor( wpos + ImVec2( 0.5f + ds * 0.5f, 2 ), wpos + ImVec2( 0.5f + ds * 2.5f, ty-1 ), glow, 0, 0, glow );
+                draw->AddRectFilledMultiColor( wpos + ImVec2( 0.5f - ds * 2.5f, 2 ), wpos + ImVec2( 0.5f - ds * 0.5f, ty-1 ), 0, glow, glow, 0 );
             }
-            DrawLine( draw, dpos + ImVec2( 0, 1 ), dpos + ImVec2( 0, ty-2 ), col, ds );
+            DrawLine( draw, wpos + ImVec2( 0.5f, 2 ), wpos + ImVec2( 0.5f, ty-1 ), col, ds );
         }
         ImGui::SameLine( 0, ty );
     }
@@ -4216,7 +4283,7 @@ void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const Addr
                 SetFont();
             }
         }
-        if( ImGui::IsMouseClicked( 0 ) )
+        if( ImGui::IsMouseClicked( ImGuiMouseButton_Left ) )
         {
             m_asmSelected = asmIdx;
             ResetAsm();
@@ -4249,7 +4316,7 @@ void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const Addr
                 FollowRead( asmIdx, line.writeX86[idx++], 64 );
             }
         }
-        else if( ImGui::IsMouseClicked( 1 ) )
+        else if( ImGui::IsMouseClicked( ImGuiMouseButton_Right ) )
         {
             m_asmSelected = -1;
             ResetAsm();
@@ -4690,18 +4757,19 @@ void SourceView::GatherIpHwStats( AddrStatData& as, Worker& worker, const View& 
         const auto hw = worker.GetHwSampleData( addr );
         if( !hw ) continue;
         uint64_t stat;
-        if( view.m_statRange.active )
+        auto& range = view.GetRange( RangeId::Statistics );
+        if( range.active )
         {
             switch( cost )
             {
-            case CostType::Cycles:          stat = CountHwSamples( hw->cycles, view.m_statRange ); break;
-            case CostType::Retirements:     stat = CountHwSamples( hw->retired, view.m_statRange ); break;
-            case CostType::BranchesTaken:   stat = CountHwSamples( hw->branchRetired, view.m_statRange ); break;
-            case CostType::BranchMiss:      stat = CountHwSamples( hw->branchMiss, view.m_statRange ); break;
-            case CostType::SlowBranches:    stat = sqrt( CountHwSamples( hw->branchMiss, view.m_statRange ) * CountHwSamples( hw->branchRetired, view.m_statRange ) ); break;
-            case CostType::CacheAccess:     stat = CountHwSamples( hw->cacheRef, view.m_statRange ); break;
-            case CostType::CacheMiss:       stat = CountHwSamples( hw->cacheMiss, view.m_statRange ); break;
-            case CostType::SlowCache:       stat = sqrt( CountHwSamples( hw->cacheMiss, view.m_statRange ) * CountHwSamples( hw->cacheRef, view.m_statRange ) ); break;
+            case CostType::Cycles:          stat = CountHwSamples( hw->cycles, range ); break;
+            case CostType::Retirements:     stat = CountHwSamples( hw->retired, range ); break;
+            case CostType::BranchesTaken:   stat = CountHwSamples( hw->branchRetired, range ); break;
+            case CostType::BranchMiss:      stat = CountHwSamples( hw->branchMiss, range ); break;
+            case CostType::SlowBranches:    stat = sqrt( CountHwSamples( hw->branchMiss, range ) * CountHwSamples( hw->branchRetired, range ) ); break;
+            case CostType::CacheAccess:     stat = CountHwSamples( hw->cacheRef, range ); break;
+            case CostType::CacheMiss:       stat = CountHwSamples( hw->cacheMiss, range ); break;
+            case CostType::SlowCache:       stat = sqrt( CountHwSamples( hw->cacheMiss, range ) * CountHwSamples( hw->cacheRef, range ) ); break;
             default: assert( false ); return;
             }
         }
@@ -4771,17 +4839,18 @@ void SourceView::CountHwStats( AddrStatData& as, Worker& worker, const View& vie
         const auto hw = worker.GetHwSampleData( addr );
         if( !hw ) continue;
         uint64_t branch, cache;
-        if( view.m_statRange.active )
+        auto& range = view.GetRange( RangeId::Statistics );
+        if( range.active )
         {
             if( hasBranchRetirement )
             {
-                branch = sqrt( CountHwSamples( hw->branchMiss, view.m_statRange ) * CountHwSamples( hw->branchRetired, view.m_statRange ) );
+                branch = sqrt( CountHwSamples( hw->branchMiss, range ) * CountHwSamples( hw->branchRetired, range ) );
             }
             else
             {
-                branch = CountHwSamples( hw->branchMiss, view.m_statRange );
+                branch = CountHwSamples( hw->branchMiss, range );
             }
-            cache = sqrt( CountHwSamples( hw->cacheMiss, view.m_statRange ) * CountHwSamples( hw->cacheRef, view.m_statRange ) );
+            cache = sqrt( CountHwSamples( hw->cacheMiss, range ) * CountHwSamples( hw->cacheRef, range ) );
         }
         else
         {
@@ -4849,9 +4918,10 @@ void SourceView::GatherChildStats( uint64_t baseAddr, unordered_flat_map<uint64_
         {
             auto cp = worker.GetChildSamples( ip );
             if( !cp ) continue;
-            auto it = std::lower_bound( cp->begin(), cp->end(), view.m_statRange.min, [] ( const auto& lhs, const auto& rhs ) { return lhs.time.Val() < rhs; } );
+            auto& range = view.GetRange( RangeId::Statistics );
+            auto it = std::lower_bound( cp->begin(), cp->end(), range.min, [] ( const auto& lhs, const auto& rhs ) { return lhs.time.Val() < rhs; } );
             if( it == cp->end() ) continue;
-            auto end = std::lower_bound( it, cp->end(), view.m_statRange.max, [] ( const auto& lhs, const auto& rhs ) { return lhs.time.Val() < rhs; } );
+            auto end = std::lower_bound( it, cp->end(), range.max, [] ( const auto& lhs, const auto& rhs ) { return lhs.time.Val() < rhs; } );
             while( it != end )
             {
                 auto child = worker.GetSymbolForAddress( it->addr );
@@ -4895,15 +4965,18 @@ uint32_t SourceView::CountAsmIpStats( uint64_t baseAddr, const Worker& worker, b
 {
     if( limitView )
     {
+        if( !worker.AreSymbolSamplesReady() ) return 0;
         auto vec = worker.GetSamplesForSymbol( baseAddr );
         if( !vec ) return 0;
-        auto it = std::lower_bound( vec->begin(), vec->end(), view.m_statRange.min, [] ( const auto& lhs, const auto& rhs ) { return lhs.time.Val() < rhs; } );
+        auto& range = view.GetRange( RangeId::Statistics );
+        auto it = std::lower_bound( vec->begin(), vec->end(), range.min, [] ( const auto& lhs, const auto& rhs ) { return lhs.time.Val() < rhs; } );
         if( it == vec->end() ) return 0;
-        auto end = std::lower_bound( it, vec->end(), view.m_statRange.max, [] ( const auto& lhs, const auto& rhs ) { return lhs.time.Val() < rhs; } );
+        auto end = std::lower_bound( it, vec->end(), range.max, [] ( const auto& lhs, const auto& rhs ) { return lhs.time.Val() < rhs; } );
         return end - it;
     }
     else
     {
+        if( !worker.AreCallstackSamplesReady() ) return 0;
         uint32_t cnt = 0;
         auto ipmap = worker.GetSymbolInstructionPointers( baseAddr );
         if( !ipmap ) return 0;

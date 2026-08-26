@@ -39,12 +39,9 @@ void View::DrawStatistics()
 {
     const auto scale = GetScale();
     ImGui::SetNextWindowSize( ImVec2( 1400 * scale, 600 * scale ), ImGuiCond_FirstUseEver );
+    m_statisticsConstraint.Constrain();
     ImGui::Begin( "Statistics", &m_showStatistics, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse );
     if( ImGui::GetCurrentWindowRead()->SkipItems ) { ImGui::End(); return; }
-#ifdef TRACY_NO_STATISTICS
-    ImGui::TextWrapped( "Collection of statistical data is disabled in this build." );
-    ImGui::TextWrapped( "Rebuild without the TRACY_NO_STATISTICS macro to enable statistics view." );
-#else
     if( !m_worker.AreSourceLocationZonesReady() && ( !m_worker.AreCallstackSamplesReady() || m_worker.GetCallstackSampleCount() == 0 ) )
     {
         const auto ty = ImGui::GetTextLineHeight();
@@ -248,6 +245,7 @@ void View::DrawStatistics()
                         total = it->second.nonReentrantTotal;
                         break;
                     }
+                    if( count == 0 ) continue;
                     if( !filterActive )
                     {
                         srcloc.push_back_no_space_check( SrcLocZonesSlim { it->first, (uint16_t)it->second.threadCnt.size(), count, total } );
@@ -276,6 +274,7 @@ void View::DrawStatistics()
         ImGui::Spacing();
         ImGui::SameLine();
         AccumulationModeComboBox();
+        m_statisticsConstraint.MarkMinWidth();
     }
     else if( m_statMode == 1 )
     {
@@ -318,6 +317,7 @@ void View::DrawStatistics()
         const char* locationTable = "Entry\0Sample\0Smart\0";
         ImGui::SetNextItemWidth( ImGui::CalcTextSize( "Sample" ).x + ImGui::GetTextLineHeight() * 2 );
         ImGui::Combo( "##location", &m_statSampleLocation, locationTable );
+        m_statisticsConstraint.MarkMinWidth();
     }
     else
     {
@@ -630,6 +630,7 @@ void View::DrawStatistics()
         ImGui::SameLine();
         ImGui::Checkbox( ICON_FA_FIRE " Top inline", &m_topInline );
         if( m_statSeparateInlines ) ImGui::EndDisabled();
+        m_statisticsConstraint.MarkMinWidth();
     }
 
     ImGui::Separator();
@@ -798,7 +799,7 @@ void View::DrawStatistics()
                     TextDisabledUnformatted( LocationToString( file, srcloc.line ) );
                     if( ImGui::IsItemHovered() )
                     {
-                        DrawSourceTooltip( file, srcloc.line );
+                        DrawSourceTooltip( file, srcloc.line, srcloc.line );
                         if( ImGui::IsItemClicked( 1 ) )
                         {
                             if( SourceFileValid( file, m_worker.GetCaptureTime(), *this, m_worker ) )
@@ -1054,9 +1055,34 @@ void View::DrawStatistics()
             }
         }
 
-        DrawSamplesStatistics( data, timeRange, m_statAccumulationMode );
+        // The denominator is the number of collected samples, excluding context
+        // switch samples, which do not participate in the sampling statistics. This
+        // way the percentages have the same meaning with and without an active
+        // range filter.
+        uint64_t totalSamples;
+        if( m_statRange.active )
+        {
+            static const auto CountInRange = []( const auto& vec, int64_t min, int64_t max ) -> uint64_t {
+                auto it = std::lower_bound( vec.begin(), vec.end(), min, []( const auto& lhs, const auto& rhs ) { return lhs.time.Val() < rhs; } );
+                auto end = std::lower_bound( it, vec.end(), max, []( const auto& lhs, const auto& rhs ) { return lhs.time.Val() < rhs; } );
+                return end - it;
+            };
+            totalSamples = 0;
+            for( auto& td : m_worker.GetThreadData() )
+            {
+                const auto cnt = CountInRange( td->samples, m_statRange.min, m_statRange.max );
+                const auto ctx = CountInRange( td->ctxSwitchSamples, m_statRange.min, m_statRange.max );
+                if( cnt > ctx ) totalSamples += cnt - ctx;
+            }
+        }
+        else
+        {
+            const auto cnt = m_worker.GetCallstackSampleCount();
+            const auto ctx = m_worker.GetContextSwitchSampleCount();
+            totalSamples = cnt > ctx ? cnt - ctx : 0;
+        }
+        DrawSamplesStatistics( data, timeRange, totalSamples, m_statAccumulationMode );
     }
-#endif
     ImGui::End();
 }
 

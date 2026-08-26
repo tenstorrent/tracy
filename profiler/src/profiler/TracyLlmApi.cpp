@@ -28,7 +28,9 @@ void TracyLlmApi::SetupCurl( void* curl )
     curl_easy_setopt( curl, CURLOPT_NOSIGNAL, 1L );
     curl_easy_setopt( curl, CURLOPT_CA_CACHE_TIMEOUT, 604800L );
     curl_easy_setopt( curl, CURLOPT_FOLLOWLOCATION, 1L );
-    curl_easy_setopt( curl, CURLOPT_TIMEOUT, 1200 );
+    curl_easy_setopt( curl, CURLOPT_CONNECTTIMEOUT, 5 );
+    curl_easy_setopt( curl, CURLOPT_LOW_SPEED_LIMIT, 1 );
+    curl_easy_setopt( curl, CURLOPT_LOW_SPEED_TIME, 1200 );
     curl_easy_setopt( curl, CURLOPT_USERAGENT, "Tracy Profiler" );
 }
 
@@ -66,6 +68,16 @@ bool TracyLlmApi::Connect( const char* url )
                 m_type = Type::LlamaSwap;
                 if( id.find( "embed" ) != std::string::npos ) m_models.back().embeddings = true;
             }
+            else if( ( m_type == Type::Unknown || m_type == Type::LlamaCpp ) && GetRequest( m_url + "/props", buf2 ) == 200 && buf2.find( "\"build_info\"" ) != std::string::npos )
+            {
+                m_type = Type::LlamaCpp;
+                if( model.contains( "status" ) && model["status"].contains( "preset" ) && model["status"]["preset"].is_string() &&
+                    model["status"]["preset"].get_ref<const std::string&>().find( "embedding" ) != std::string::npos )
+                {
+                    m_models.back().embeddings = true;
+                }
+                if( model.contains( "meta" ) && model["meta"].contains( "n_ctx" ) ) m_models.back().contextSize = model["meta"]["n_ctx"].get<int>();
+            }
             else if( ( m_type == Type::Unknown || m_type == Type::LmStudio ) && GetRequest( m_url + "/api/v0/models/" + id, buf2 ) == 200 )
             {
                 m_type = Type::LmStudio;
@@ -77,6 +89,7 @@ bool TracyLlmApi::Connect( const char* url )
             else if( m_type == Type::Unknown )
             {
                 m_type = Type::Other;
+                if( id.find( "embed" ) != std::string::npos ) m_models.back().embeddings = true;
             }
         }
     }
@@ -176,12 +189,15 @@ bool TracyLlmApi::ChatCompletion( const nlohmann::json& req, const std::function
     {
         if( m_models[modelIdx].contextSize <= 0 )
         {
-            if( m_type == Type::LlamaSwap )
+            if( m_type == Type::LlamaSwap || m_type == Type::LlamaCpp )
             {
                 curl_easy_reset( m_curl );
                 SetupCurl( m_curl );
                 std::string buf;
-                if( GetRequest( m_url + "/upstream/" + m_models[modelIdx].name + "/props", buf ) == 200 )
+                const auto url = m_type == Type::LlamaSwap
+                    ? m_url + "/upstream/" + m_models[modelIdx].name + "/props"
+                    : m_url + "/props?model=" + m_models[modelIdx].name;
+                if( GetRequest( url, buf ) == 200 )
                 {
                     auto json = nlohmann::json::parse( buf );
                     if( json.contains( "default_generation_settings" ) )
@@ -227,11 +243,21 @@ bool TracyLlmApi::Embeddings( const nlohmann::json& req, nlohmann::json& respons
 
 int TracyLlmApi::Tokenize( const std::string& text, int modelIdx )
 {
-    if( m_type == Type::LlamaSwap )
+    if( m_type == Type::LlamaSwap || m_type == Type::LlamaCpp )
     {
         std::string buf;
         nlohmann::json req = { { "content", text } };
-        auto res = PostRequest( m_url + "/upstream/" + m_models[modelIdx].name + "/tokenize", req.dump( -1, ' ', false, nlohmann::json::error_handler_t::replace ), buf, true );
+        std::string url;
+        if( m_type == Type::LlamaSwap )
+        {
+            url = m_url + "/upstream/" + m_models[modelIdx].name + "/tokenize";
+        }
+        else
+        {
+            url = m_url + "/tokenize";
+            req["model"] = m_models[modelIdx].name;
+        }
+        auto res = PostRequest( url, req.dump( -1, ' ', false, nlohmann::json::error_handler_t::replace ), buf, true );
         if( res != 200 ) return -1;
 
         try

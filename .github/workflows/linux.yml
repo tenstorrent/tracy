@@ -7,6 +7,13 @@ on:
     branches: [ master ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CPM_SOURCE_CACHE: ${{ github.workspace }}/cpm-cache
 
@@ -16,7 +23,7 @@ jobs:
     container: archlinux:base-devel
     steps:
     - name: Install dependencies
-      run: pacman -Syu --noconfirm && pacman -S --noconfirm --needed freetype2 debuginfod wayland dbus libxkbcommon libglvnd meson cmake git wayland-protocols nodejs lua
+      run: pacman -Syu --noconfirm && pacman -S --noconfirm --needed freetype2 debuginfod wayland dbus libxkbcommon libglvnd meson cmake git wayland-protocols nodejs lua clang sdl3_image python-jinja
     - name: Trust git repo
       run: git config --global --add safe.directory '*'
     - uses: actions/checkout@v4
@@ -26,39 +33,49 @@ jobs:
         path: ${{ env.CPM_SOURCE_CACHE }}
         key: ${{ runner.os }}-cpm-${{ hashFiles('**/vendor.cmake', '**/CMakeLists.txt') }}
         restore-keys: ${{ runner.os }}-cpm-
+    - name: Determine build parallelism
+      run: |
+        if [ "${ACT:-}" != "true" ] && [ "${FORGEJO_ACTIONS:-}" != "true" ]; then
+          echo "CMAKE_PARALLEL=--parallel 2" >> "$GITHUB_ENV"
+        else
+          echo "CMAKE_PARALLEL=--parallel" >> "$GITHUB_ENV"
+        fi
+    - name: Dyna example / clang
+      run: |
+        CC=clang CXX=clang++ cmake -B examples/dyna/build-clang -S examples/dyna -DCMAKE_BUILD_TYPE=Release
+        cmake --build examples/dyna/build-clang $CMAKE_PARALLEL
+    - name: Dyna example / gcc
+      run: |
+        CC=gcc CXX=g++ cmake -B examples/dyna/build-gcc -S examples/dyna -DCMAKE_BUILD_TYPE=Release
+        cmake --build examples/dyna/build-gcc $CMAKE_PARALLEL
     - name: Profiler GUI
       run: |
         cmake -B profiler/build -S profiler -DCMAKE_BUILD_TYPE=Release -DGIT_REV=${{ github.sha }}
-        if [ "${ACT:-}" != "true" ] && [ "${FORGEJO_ACTIONS:-}" != "true" ]; then
-          cmake --build profiler/build
-        else
-          cmake --build profiler/build --parallel
-        fi
+        cmake --build profiler/build $CMAKE_PARALLEL
     - name: Update utility
       run: |
         cmake -B update/build -S update -DCMAKE_BUILD_TYPE=Release -DGIT_REV=${{ github.sha }}
-        cmake --build update/build --parallel
+        cmake --build update/build $CMAKE_PARALLEL
     - name: Capture utility
       run: |
         cmake -B capture/build -S capture -DCMAKE_BUILD_TYPE=Release -DGIT_REV=${{ github.sha }}
-        cmake --build capture/build --parallel
+        cmake --build capture/build $CMAKE_PARALLEL
     - name: Csvexport utility
       run: |
         cmake -B csvexport/build -S csvexport -DCMAKE_BUILD_TYPE=Release -DGIT_REV=${{ github.sha }}
-        cmake --build csvexport/build --parallel
+        cmake --build csvexport/build $CMAKE_PARALLEL
     - name: Import utilities
       run: |
         cmake -B import/build -S import -DCMAKE_BUILD_TYPE=Release -DGIT_REV=${{ github.sha }}
-        cmake --build import/build --parallel
+        cmake --build import/build $CMAKE_PARALLEL
     - name: Merge utility
       run: |
         cmake -B merge/build -S merge -DCMAKE_BUILD_TYPE=Release -DGIT_REV=${{ github.sha }}
-        cmake --build merge/build --parallel
+        cmake --build merge/build $CMAKE_PARALLEL
     - name: Library (cmake)
       run: |
         cmake -B build -DCMAKE_BUILD_TYPE=Release -DTRACY_ENABLE=ON
-        cmake --build build
-        cmake --install build
+        cmake --build build $CMAKE_PARALLEL
       env:
         CMAKE_INSTALL_PREFIX: ${{ github.workspace }}/bin
     - name: Library (meson)
@@ -66,27 +83,7 @@ jobs:
         meson setup -Dprefix=$GITHUB_WORKSPACE/bin/lib -Dtracy_enable=true build-meson
         meson compile -C build-meson
     - name: Test application
-      run: |
-        # test compilation with different flags
-        # we clean the build folder to reset cached variables between runs
-        cmake -B test/build -S test -DCMAKE_BUILD_TYPE=Release
-        cmake --build test/build --parallel
-        rm -rf test/build
-
-        # same with TRACY_ON_DEMAND
-        cmake -B test/build -S test -DCMAKE_BUILD_TYPE=Release -DTRACY_ON_DEMAND=ON .
-        cmake --build test/build --parallel
-        rm -rf test/build
-
-        # same with TRACY_DELAYED_INIT TRACY_MANUAL_LIFETIME
-        cmake -B test/build -S test -DCMAKE_BUILD_TYPE=Release -DTRACY_DELAYED_INIT=ON -DTRACY_MANUAL_LIFETIME=ON .
-        cmake --build test/build --parallel
-        rm -rf test/build
-
-        # same with TRACY_DEMANGLE
-        cmake -B test/build -S test -DCMAKE_BUILD_TYPE=Release -DTRACY_DEMANGLE=ON .
-        cmake --build test/build --parallel
-        rm -rf test/build
+      uses: ./.github/actions/test-tracy
     - name: Find Artifacts
       id: find_artifacts
       run: |
@@ -94,6 +91,7 @@ jobs:
         cp profiler/build/tracy-profiler bin
         cp update/build/tracy-update bin
         cp capture/build/tracy-capture bin
+        cp capture/build/tracy-capture-daemon bin
         cp csvexport/build/tracy-csvexport bin
         cp import/build/tracy-import-chrome bin
         cp import/build/tracy-import-fuchsia bin
