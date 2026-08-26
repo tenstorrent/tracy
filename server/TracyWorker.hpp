@@ -800,6 +800,7 @@ private:
     tracy_force_inline void ProcessGpuZoneAnnotation( const QueueGpuZoneAnnotation& ev );
     tracy_force_inline void ProcessGpuMarkerMeta( const QueueGpuMarkerMeta& ev );
     tracy_force_inline void ProcessGpuMarker( const QueueGpuMarker& ev );
+    tracy_force_inline void ProcessGpuZone( const QueueGpuZone& ev );
     tracy_force_inline MemEvent* ProcessMemAlloc( const QueueMemAlloc& ev );
     tracy_force_inline MemEvent* ProcessMemAllocNamed( const QueueMemAlloc& ev );
     tracy_force_inline MemEvent* ProcessMemFree( const QueueMemFree& ev );
