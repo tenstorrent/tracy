@@ -2837,6 +2837,23 @@ Profiler::DequeueStatus Profiler::Dequeue( moodycamel::ConsumerToken& token )
                         SendSingleString( (const char*)ptr, size );
                         tracy_free_fast( (void*)ptr );
                         break;
+                    case QueueType::GpuMarkerMeta:
+                        ptr = MemRead<uint64_t>( &item->gpuMarkerMetaFat.ptr );
+                        size = MemRead<uint16_t>( &item->gpuMarkerMetaFat.size );
+                        SendSingleString( (const char*)ptr, size );
+                        tracy_free_fast( (void*)ptr );
+                        break;
+                    case QueueType::GpuMarker:
+                    {
+                        int64_t t = MemRead<int64_t>( &item->gpuMarker.gpuTime );
+                        int64_t dt = t - refGpu;
+                        refGpu = t;
+                        MemWrite( &item->gpuMarker.gpuTime, dt );
+                        ptr = MemRead<uint64_t>( &item->gpuMarker.srcloc );
+                        SendSourceLocationPayload( ptr );
+                        tracy_free_fast( (void*)ptr );
+                        break;
+                    }
                     case QueueType::PlotDataInt:
                     case QueueType::PlotDataFloat:
                     case QueueType::PlotDataDouble:
