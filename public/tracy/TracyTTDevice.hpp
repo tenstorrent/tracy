@@ -13,6 +13,7 @@
 #define TracyTTPushStartZone(c, e)
 #define TracyTTPushEndZone(c, e)
 #define TracyTTPushMarker(c, e)
+#define TracyTTPushMarkerLockfree(c, e)
 #define TracyTTPushZone(c, s, t, b, e)
 #define TracyTTPushZoneSerial(c, s, t, b, e)
 
@@ -390,6 +391,44 @@ namespace tracy {
             Profiler::QueueSerialFinish();
         }
 
+        // Lock-free twin of PushMarker. Use only when this context was also created lock-free on this
+        // thread: the client drains the lock-free queues before the serial one, and they are per-thread,
+        // so either mismatch lets a marker reach the server ahead of the context it references.
+        void PushMarkerLockfree(const TTDeviceMarker& marker) {
+            const tracy::Color::ColorType color = this->getMarkerColor(marker);
+
+            const auto srcloc = Profiler::AllocSourceLocation(
+                marker.line,
+                marker.file.c_str(),
+                marker.file.length(),
+                "",
+                0,
+                marker.marker_name.c_str(),
+                marker.marker_name.length(),
+                color);
+
+            const std::string meta = this->getMarkerMetaString(marker);
+            if (!meta.empty()) {
+                const uint16_t metaLen = (uint16_t)std::min<size_t>(meta.length(), std::numeric_limits<uint16_t>::max());
+                auto ptr = (char*)tracy_malloc(metaLen);
+                memcpy(ptr, meta.c_str(), metaLen);
+
+                TracyLfqPrepare(QueueType::GpuMarkerMeta);
+                MemWrite(&item->gpuMarkerMetaFat.context, this->GetId());
+                MemWrite(&item->gpuMarkerMetaFat.ptr, (uint64_t)ptr);
+                MemWrite(&item->gpuMarkerMetaFat.size, metaLen);
+                TracyLfqCommit;
+            }
+
+            TracyLfqPrepare(QueueType::GpuMarker);
+            MemWrite(&item->gpuMarker.gpuTime, (int64_t)round((double)marker.timestamp / m_frequency));
+            MemWrite(&item->gpuMarker.srcloc, srcloc);
+            MemWrite(&item->gpuMarker.thread, (uint32_t)marker.get_thread_id());
+            MemWrite(&item->gpuMarker.context, this->GetId());
+            MemWrite(&item->gpuMarker.markerType, (uint8_t)marker.marker_type);
+            TracyLfqCommit;
+        }
+
         // Per (context, thread), calls must arrive in zone completion order (i.e., sorted by `end`); the server rebuilds nesting from that ordering.
         tracy_force_inline void PushZone(
             const SourceLocationData* srcloc, uint32_t thread, uint64_t start, uint64_t end) {
@@ -492,6 +531,7 @@ using TracyTTCtx = tracy::TTCtx*;
 #define TracyTTPushStartMarker(ctx, marker) ctx->PushStartMarker(marker)
 #define TracyTTPushEndMarker(ctx, marker) ctx->PushEndMarker(marker)
 #define TracyTTPushMarker(ctx, marker) ctx->PushMarker(marker)
+#define TracyTTPushMarkerLockfree(ctx, marker) ctx->PushMarkerLockfree(marker)
 #define TracyTTPushZone(ctx, srcloc, thread, start, end) ctx->PushZone(srcloc, thread, start, end)
 #define TracyTTPushZoneSerial(ctx, srcloc, thread, start, end) ctx->PushZoneSerial(srcloc, thread, start, end)
 
