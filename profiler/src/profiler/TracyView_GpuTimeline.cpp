@@ -292,7 +292,7 @@ int View::DrawGpuZoneLevel( const V& vec, bool hover, double pxns, int64_t nspx,
         if( zsz < MinVisSize )
         {
             const auto color = GetZoneColor( ev );
-            const auto MinVisNs = MinVisSize * nspx;
+            const auto MinVisNs = int64_t( round( MinVisSize * nspx ) );
             int num = 0;
             const auto px0 = ( start - m_vd.zvStart ) * pxns;
             auto px1ns = end - m_vd.zvStart;
@@ -469,7 +469,7 @@ int View::SkipGpuZoneLevel( const V& vec, bool hover, double pxns, int64_t nspx,
         const auto zsz = std::max( ( end - start ) * pxns, pxns * 0.5 );
         if( zsz < MinVisSize )
         {
-            const auto MinVisNs = MinVisSize * nspx;
+            const auto MinVisNs = int64_t( round( MinVisSize * nspx ) );
             auto px1ns = end - m_vd.zvStart;
             auto nextTime = end + MinVisNs;
             for(;;)
