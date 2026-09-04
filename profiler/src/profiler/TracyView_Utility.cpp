@@ -917,6 +917,23 @@ const char* View::SourceSubstitution( const char* srcFile ) const
     return res.c_str();
 }
 
+float View::ZoneNameWidth( const char* name )
+{
+    const auto frame = ImGui::GetFrameCount();
+    const auto font = ImGui::GetFont();
+    const auto size = ImGui::GetFontSize();
+    if( m_zoneNameWidth.frame != frame || m_zoneNameWidth.font != font || m_zoneNameWidth.size != size )
+    {
+        m_zoneNameWidth.frame = frame;
+        m_zoneNameWidth.font = font;
+        m_zoneNameWidth.size = size;
+        m_zoneNameWidth.width.clear();
+    }
+    auto it = m_zoneNameWidth.width.find( name );
+    if( it == m_zoneNameWidth.width.end() ) it = m_zoneNameWidth.width.emplace( name, ImGui::CalcTextSize( name ).x ).first;
+    return it->second;
+}
+
 int64_t View::AdjustGpuTime( int64_t time, int64_t begin, int drift )
 {
     if( time < 0 ) return time;

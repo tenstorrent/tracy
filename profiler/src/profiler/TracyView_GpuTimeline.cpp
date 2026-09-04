@@ -288,7 +288,7 @@ void View::DrawGpuZoneList( const TimelineContext& ctx, const std::vector<Timeli
 
             const char* zoneName = m_worker.GetZoneName( ev );
             const bool label = px1 - px0 >= minLabelWidth;
-            auto tsz = label ? ImGui::CalcTextSize( zoneName ) : ImVec2( 0, ty );
+            auto tsz = ImVec2( label ? ZoneNameWidth( zoneName ) : 0.f, ty );
             if( label && ( m_vd.shortenName == ShortenName::Always || ( ( m_vd.shortenName == ShortenName::NoSpace || m_vd.shortenName == ShortenName::NoSpaceAndNormalize ) && tsz.x > zsz ) ) )
             {
                 zoneName = ShortenZoneName( m_vd.shortenName, zoneName, tsz, zsz );

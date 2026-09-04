@@ -596,6 +596,17 @@ private:
     const ZoneEvent* m_zoneHover = nullptr;
     DecayValue<const ZoneEvent*> m_zoneHover2 = nullptr;
     const GpuEvent* m_gpuHover = nullptr;
+
+    // Zone-name widths measured this frame with this font, keyed by the name's address: a dense timeline draws the
+    // same few names thousands of times.
+    struct
+    {
+        int frame = -1;
+        const ImFont* font = nullptr;
+        float size = 0;
+        unordered_flat_map<const char*, float> width;
+    } m_zoneNameWidth;
+    float ZoneNameWidth( const char* name );
     int m_frameHover = -1;
     bool m_messagesScrollBottom;
 
