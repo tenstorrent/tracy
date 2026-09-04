@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include "TracyImGui.hpp"
 #include "TracyPopcnt.hpp"
 #include "TracyPrint.hpp"
@@ -6,12 +8,15 @@
 #include "TracyUtility.hpp"
 #include "TracyView.hpp"
 #include "TracyWorker.hpp"
+#include "../server/TracyTaskDispatch.hpp"
 
 namespace tracy
 {
 
+constexpr float MinVisSize = 3;
+
 TimelineItemGpu::TimelineItemGpu( View& view, Worker& worker, GpuCtxData* gpu )
-    : TimelineItem( view, worker, gpu, false )
+    : TimelineItem( view, worker, gpu, true )
     , m_gpu( gpu )
     , m_idx( view.GetNextGpuIdx() )
 {
@@ -211,9 +216,124 @@ int64_t TimelineItemGpu::RangeEnd() const
     return t;
 }
 
+void TimelineItemGpu::Preprocess( const TimelineContext& ctx, TaskDispatch& td, bool visible, int yPos )
+{
+    // Lanes appear as their first zone arrives during a live capture: re-sync with threadData whenever it
+    // grew, sorted by thread id so the rows keep a stable order.
+    if( m_lanes.size() != m_gpu->threadData.size() )
+    {
+        m_lanes.clear();
+        m_lanes.reserve( m_gpu->threadData.size() );
+        for( auto& t : m_gpu->threadData ) m_lanes.emplace_back( GpuLaneDraw { t.first, -1, 0, {} } );
+        std::sort( m_lanes.begin(), m_lanes.end(), [] ( const auto& l, const auto& r ) { return l.tid < r.tid; } );
+    }
+    // GpuDrift may insert into the view's drift map, so resolve it here on the main thread.
+    const int drift = m_view.GetGpuDrift( m_gpu );
+    for( auto& lane : m_lanes )
+    {
+        assert( lane.draw.empty() );
+        auto it = m_gpu->threadData.find( lane.tid );
+        if( it == m_gpu->threadData.end() ) continue;
+        const GpuCtxThreadData* tdata = &it->second;
+        td.Queue( [this, &ctx, tdata, visible, drift, &lane] {
+            PreprocessLane( ctx, *tdata, visible, drift, lane );
+        } );
+    }
+}
+
+void TimelineItemGpu::PreprocessLane( const TimelineContext& ctx, const GpuCtxThreadData& td, bool visible, int drift, GpuLaneDraw& lane )
+{
+    auto& tl = td.timeline;
+    lane.begin = -1;
+    if( !tl.empty() )
+    {
+        lane.begin = tl.is_magic() ? ((Vector<GpuEvent>*)&tl)->front().GpuStart() : tl.front()->GpuStart();
+    }
+    lane.depth = lane.begin >= 0 ? PreprocessZoneLevel( ctx, tl, 0, visible, lane.begin, drift, lane.draw ) : 0;
+}
+
+void TimelineItemGpu::DrawFinished()
+{
+    for( auto& lane : m_lanes ) lane.draw.clear();
+}
+
 bool TimelineItemGpu::DrawContents( const TimelineContext& ctx, int& offset )
 {
-    return m_view.DrawGpu( ctx, *m_gpu, offset );
+    return m_view.DrawGpu( ctx, *m_gpu, m_lanes, offset );
 }
+
+int TimelineItemGpu::PreprocessZoneLevel( const TimelineContext& ctx, const Vector<short_ptr<GpuEvent>>& vec, int depth, bool visible, int64_t begin, int drift, std::vector<TimelineDraw>& draw )
+{
+    if( vec.is_magic() )
+    {
+        return PreprocessZoneLevel<VectorAdapterDirect<GpuEvent>>( ctx, *(Vector<GpuEvent>*)( &vec ), depth, visible, begin, drift, draw );
+    }
+    else
+    {
+        return PreprocessZoneLevel<VectorAdapterPointer<GpuEvent>>( ctx, vec, depth, visible, begin, drift, draw );
+    }
+}
+
+template<typename Adapter, typename V>
+int TimelineItemGpu::PreprocessZoneLevel( const TimelineContext& ctx, const V& vec, int depth, bool visible, int64_t begin, int drift, std::vector<TimelineDraw>& draw )
+{
+    if( depth >= 256 ) return depth;
+
+    const auto vStart = ctx.vStart;
+    const auto vEnd = ctx.vEnd;
+    const auto nspx = ctx.nspx;
+
+    const auto MinVisNs = int64_t( round( ctx.scale * MinVisSize * nspx ) );
+
+    // Ends compare as uint64_t so that unended zones (end = -1) sort last and are still drawn.
+    auto zoneEnd = [this, begin, drift] ( const GpuEvent& ev ) { return (uint64_t)View::AdjustGpuTime( m_worker.GetZoneEnd( ev ), begin, drift ); };
+
+    auto it = std::lower_bound( vec.begin(), vec.end(), std::max<int64_t>( 0, vStart ), [&zoneEnd] ( const auto& l, const auto& r ) { Adapter a; return zoneEnd( a(l) ) < (uint64_t)r; } );
+    if( it == vec.end() ) return depth;
+
+    const auto zitend = std::lower_bound( it, vec.end(), std::max<int64_t>( 0, vEnd ), [begin, drift] ( const auto& l, const auto& r ) { Adapter a; return (uint64_t)View::AdjustGpuTime( a(l).GpuStart(), begin, drift ) < (uint64_t)r; } );
+    if( it == zitend ) return depth;
+    Adapter a;
+    if( View::AdjustGpuTime( m_worker.GetZoneEnd( a(*(zitend-1)) ), begin, drift ) < vStart ) return depth;
+
+    int maxdepth = depth + 1;
+
+    while( it < zitend )
+    {
+        auto& ev = a(*it);
+        const auto end = View::AdjustGpuTime( m_worker.GetZoneEnd( ev ), begin, drift );
+        const auto start = View::AdjustGpuTime( ev.GpuStart(), begin, drift );
+        const auto zsz = end - start;
+        if( zsz < MinVisNs )
+        {
+            auto nextTime = end + MinVisNs;
+            auto next = it + 1;
+            for(;;)
+            {
+                next = std::lower_bound( next, zitend, std::max<int64_t>( 0, nextTime ), [&zoneEnd] ( const auto& l, const auto& r ) { Adapter a; return zoneEnd( a(l) ) < (uint64_t)r; } );
+                if( next == zitend ) break;
+                const auto pt = View::AdjustGpuTime( m_worker.GetZoneEnd( a(*(next-1)) ), begin, drift );
+                const auto nt = View::AdjustGpuTime( m_worker.GetZoneEnd( a(*next) ), begin, drift );
+                if( nt - pt >= MinVisNs ) break;
+                nextTime = nt + MinVisNs;
+            }
+            if( visible ) draw.emplace_back( TimelineDraw { TimelineDrawType::Folded, uint16_t( depth ), (void**)&ev, m_worker.GetZoneEnd( a(*(next-1)) ), uint32_t( next - it ), 0 } );
+            it = next;
+        }
+        else
+        {
+            if( ev.Child() >= 0 )
+            {
+                const auto d = PreprocessZoneLevel( ctx, m_worker.GetGpuChildren( ev.Child() ), depth + 1, visible, begin, drift, draw );
+                if( d > maxdepth ) maxdepth = d;
+            }
+            if( visible ) draw.emplace_back( TimelineDraw { TimelineDrawType::Zone, uint16_t( depth ), (void**)&ev, 0, 0, 0 } );
+            ++it;
+        }
+    }
+
+    return maxdepth;
+}
+
 
 }
