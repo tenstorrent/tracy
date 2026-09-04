@@ -255,9 +255,8 @@ void View::DrawZoneList( const TimelineContext& ctx, const std::vector<TimelineD
             const auto x = pr0 + ( pr1 - pr0 - tsz.x ) / 2;
             if( x < margin || x > w - tsz.x ) // Would draw outside of the window, align to border.
             {
-                ImGui::PushClipRect( wpos + ImVec2( tpx0, offset ), wpos + ImVec2( px1, offset + tsz.y * 2 ), true );
-                DrawTextContrast( draw, wpos + ImVec2( std::max( tpx0, std::min( double( w - tsz.x ), x ) ), offset ), color, zoneName );
-                ImGui::PopClipRect();
+                const auto tx = std::max( tpx0, std::min( double( w - tsz.x ), x ) );
+                DrawTextContrastClipped( draw, wpos + ImVec2( tx, offset ), color, zoneName, px1 - tx );
             }
             else if( pr1 == pr0 ) // Fits inside pxns * 0.5 => Use zone center.
             {
@@ -270,12 +269,12 @@ void View::DrawZoneList( const TimelineContext& ctx, const std::vector<TimelineD
         }
         else
         {
-            // Draw clipped since zone is too small to contain the text.
-            ImGui::PushClipRect( wpos + ImVec2( tpx0, offset ), wpos + ImVec2( px1, offset + tsz.y * 2 ), true );
-            DrawTextContrast( draw, wpos + ImVec2( tpx0, offset ), color, zoneName );
-            ImGui::PopClipRect();
+            // Zone is too small to contain the text: draw the part that fits.
+            DrawTextContrastClipped( draw, wpos + ImVec2( tpx0, offset ), color, zoneName, px1 - tpx0 );
         }
     };
+    // Below one glyph of width a zone shows no label and its name is not measured.
+    const auto minLabelWidth = ty * 0.5f;
 
     for( auto& v : drawList )
     {
@@ -336,13 +335,16 @@ void View::DrawZoneList( const TimelineContext& ctx, const std::vector<TimelineD
                     m_zoneHover = &ev;
                 }
             }
-            const auto tmp = RealToString( v.num );
-            const auto tsz = ImGui::CalcTextSize( tmp );
             const auto tpx0 = std::max( px0, margin );
-            if( tsz.x < px1 - tpx0)
+            if( px1 - tpx0 >= minLabelWidth )
             {
-                const auto x = tpx0 + ( px1 - tpx0 - tsz.x ) / 2;
-                DrawTextContrast( draw, wpos + ImVec2( x, offset ), 0xFF4488DD, tmp );
+                const auto tmp = RealToString( v.num );
+                const auto tsz = ImGui::CalcTextSize( tmp );
+                if( tsz.x < px1 - tpx0)
+                {
+                    const auto x = tpx0 + ( px1 - tpx0 - tsz.x ) / 2;
+                    DrawTextContrast( draw, wpos + ImVec2( x, offset ), 0xFF4488DD, tmp );
+                }
             }
             break;
         }
@@ -353,18 +355,18 @@ void View::DrawZoneList( const TimelineContext& ctx, const std::vector<TimelineD
             const auto pr0 = ( ev.Start() - vStart ) * pxns;
             const auto pr1 = ( end - vStart ) * pxns;
             const auto zsz = std::max( pr1 - pr0, pxns * 0.5 );
+            const auto px0 = std::max( pr0, -10.0 );
+            const auto px1 = std::max( { std::min( pr1, double( w + 10 ) ), px0 + pxns * 0.5, px0 + MinVisSize } );
 
             const auto zoneColor = GetZoneColorData( ev, tid, v.depth, v.inheritedColor );
             const char* zoneName = m_worker.GetZoneName( ev );
 
-            auto tsz = ImGui::CalcTextSize( zoneName );
-            if( m_vd.shortenName == ShortenName::Always || ( ( m_vd.shortenName == ShortenName::NoSpace || m_vd.shortenName == ShortenName::NoSpaceAndNormalize ) && tsz.x > zsz ) )
+            const bool label = px1 - px0 >= minLabelWidth;
+            auto tsz = label ? ImGui::CalcTextSize( zoneName ) : ImVec2( 0, ty );
+            if( label && ( m_vd.shortenName == ShortenName::Always || ( ( m_vd.shortenName == ShortenName::NoSpace || m_vd.shortenName == ShortenName::NoSpaceAndNormalize ) && tsz.x > zsz ) ) )
             {
                 zoneName = ShortenZoneName( m_vd.shortenName, zoneName, tsz, zsz );
             }
-
-            const auto px0 = std::max( pr0, -10.0 );
-            const auto px1 = std::max( { std::min( pr1, double( w + 10 ) ), px0 + pxns * 0.5, px0 + MinVisSize } );
             draw->AddRectFilled( wpos + ImVec2( px0, offset ), wpos + ImVec2( px1, offset + tsz.y ), zoneColor.color );
             if( zoneColor.highlight )
             {
@@ -383,7 +385,7 @@ void View::DrawZoneList( const TimelineContext& ctx, const std::vector<TimelineD
                 DrawLine( draw, dpos + ImVec2( px0, offset + tsz.y ), dpos + ImVec2( px0, offset ), dpos + ImVec2( px1-1, offset ), zoneColor.accentColor, zoneColor.thickness );
                 DrawLine( draw, dpos + ImVec2( px0, offset + tsz.y ), dpos + ImVec2( px1-1, offset + tsz.y ), dpos + ImVec2( px1-1, offset ), darkColor, zoneColor.thickness );
             }
-            DrawZoneText( 0xFFFFFFFF, zoneName, tsz, pr0, pr1, px0, px1, offset );
+            if( label ) DrawZoneText( 0xFFFFFFFF, zoneName, tsz, pr0, pr1, px0, px1, offset );
 
             if( hover && ImGui::IsMouseHoveringRect( wpos + ImVec2( px0, offset ), wpos + ImVec2( px1, offset + tsz.y + 1 ) ) )
             {

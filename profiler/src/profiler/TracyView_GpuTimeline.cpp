@@ -4,6 +4,7 @@
 #include "TracyPrint.hpp"
 #include "TracyTimelineContext.hpp"
 #include "TracyTimelineDraw.hpp"
+#include "TracyUtility.hpp"
 #include "TracyView.hpp"
 #include "../Fonts.hpp"
 #include "../public/common/TracyTTDeviceData.hpp"
@@ -216,6 +217,8 @@ void View::DrawGpuZoneList( const TimelineContext& ctx, const std::vector<Timeli
     const auto pxns = ctx.pxns;
     const auto hover = ctx.hover;
     const auto vStart = ctx.vStart;
+    // Below one glyph of width a zone shows no label and its name is not measured.
+    const auto minLabelWidth = ty * 0.5f;
 
     for( auto& v : drawList )
     {
@@ -271,12 +274,15 @@ void View::DrawGpuZoneList( const TimelineContext& ctx, const std::vector<Timeli
                     m_gpuEnd = ev.CpuEnd();
                 }
             }
-            const auto tmp = RealToString( v.num );
-            const auto tsz = ImGui::CalcTextSize( tmp );
-            if( tsz.x < px1 - px0 )
+            if( px1 - px0 >= minLabelWidth )
             {
-                const auto x = px0 + ( px1 - px0 - tsz.x ) / 2;
-                DrawTextContrast( draw, wpos + ImVec2( x, offset ), 0xFF4488DD, tmp );
+                const auto tmp = RealToString( v.num );
+                const auto tsz = ImGui::CalcTextSize( tmp );
+                if( tsz.x < px1 - px0 )
+                {
+                    const auto x = px0 + ( px1 - px0 - tsz.x ) / 2;
+                    DrawTextContrast( draw, wpos + ImVec2( x, offset ), 0xFF4488DD, tmp );
+                }
             }
             break;
         }
@@ -284,13 +290,18 @@ void View::DrawGpuZoneList( const TimelineContext& ctx, const std::vector<Timeli
         {
             const auto end = AdjustGpuTime( m_worker.GetZoneEnd( ev ), begin, drift );
             const auto zsz = std::max( ( end - start ) * pxns, pxns * 0.5 );
-            const char* zoneName = m_worker.GetZoneName( ev );
-            auto tsz = ImGui::CalcTextSize( zoneName );
-
             const auto pr0 = ( start - vStart ) * pxns;
             const auto pr1 = ( end - vStart ) * pxns;
             const auto px0 = std::max( pr0, -10.0 );
             const auto px1 = std::max( { std::min( pr1, double( w + 10 ) ), px0 + pxns * 0.5, px0 + MinVisSize } );
+
+            const char* zoneName = m_worker.GetZoneName( ev );
+            const bool label = px1 - px0 >= minLabelWidth;
+            auto tsz = label ? ImGui::CalcTextSize( zoneName ) : ImVec2( 0, ty );
+            if( label && ( m_vd.shortenName == ShortenName::Always || ( ( m_vd.shortenName == ShortenName::NoSpace || m_vd.shortenName == ShortenName::NoSpaceAndNormalize ) && tsz.x > zsz ) ) )
+            {
+                zoneName = ShortenZoneName( m_vd.shortenName, zoneName, tsz, zsz );
+            }
             const auto zoneColor = GetZoneColorData( ev );
             draw->AddRectFilled( wpos + ImVec2( px0, offset ), wpos + ImVec2( px1, offset + tsz.y ), zoneColor.color );
             if( zoneColor.highlight )
@@ -310,29 +321,30 @@ void View::DrawGpuZoneList( const TimelineContext& ctx, const std::vector<Timeli
                 DrawLine( draw, dpos + ImVec2( px0, offset + tsz.y ), dpos + ImVec2( px0, offset ), dpos + ImVec2( px1-1, offset ), zoneColor.accentColor, zoneColor.thickness );
                 DrawLine( draw, dpos + ImVec2( px0, offset + tsz.y ), dpos + ImVec2( px1-1, offset + tsz.y ), dpos + ImVec2( px1-1, offset ), darkColor, zoneColor.thickness );
             }
-            if( tsz.x < zsz )
+            if( label )
             {
-                const auto x = ( start - vStart ) * pxns + ( ( end - start ) * pxns - tsz.x ) / 2;
-                if( x < 0 || x > w - tsz.x )
+                if( tsz.x < zsz )
                 {
-                    ImGui::PushClipRect( wpos + ImVec2( px0, offset ), wpos + ImVec2( px1, offset + tsz.y * 2 ), true );
-                    DrawTextContrast( draw, wpos + ImVec2( std::max( std::max( 0., px0 ), std::min( double( w - tsz.x ), x ) ), offset ), 0xFFFFFFFF, zoneName );
-                    ImGui::PopClipRect();
-                }
-                else if( ev.GpuStart() == ev.GpuEnd() )
-                {
-                    DrawTextContrast( draw, wpos + ImVec2( px0 + ( px1 - px0 - tsz.x ) * 0.5, offset ), 0xFFFFFFFF, zoneName );
+                    const auto x = ( start - vStart ) * pxns + ( ( end - start ) * pxns - tsz.x ) / 2;
+                    if( x < 0 || x > w - tsz.x )
+                    {
+                        const auto tx = std::max( std::max( 0., px0 ), std::min( double( w - tsz.x ), x ) );
+                        DrawTextContrastClipped( draw, wpos + ImVec2( tx, offset ), 0xFFFFFFFF, zoneName, px1 - tx );
+                    }
+                    else if( ev.GpuStart() == ev.GpuEnd() )
+                    {
+                        DrawTextContrast( draw, wpos + ImVec2( px0 + ( px1 - px0 - tsz.x ) * 0.5, offset ), 0xFFFFFFFF, zoneName );
+                    }
+                    else
+                    {
+                        DrawTextContrast( draw, wpos + ImVec2( x, offset ), 0xFFFFFFFF, zoneName );
+                    }
                 }
                 else
                 {
-                    DrawTextContrast( draw, wpos + ImVec2( x, offset ), 0xFFFFFFFF, zoneName );
+                    const auto tx = std::max( pr0, 0. );
+                    DrawTextContrastClipped( draw, wpos + ImVec2( tx, offset ), 0xFFFFFFFF, zoneName, px1 - tx );
                 }
-            }
-            else
-            {
-                ImGui::PushClipRect( wpos + ImVec2( px0, offset ), wpos + ImVec2( px1, offset + tsz.y * 2 ), true );
-                DrawTextContrast( draw, wpos + ImVec2( ( start - vStart ) * pxns, offset ), 0xFFFFFFFF, zoneName );
-                ImGui::PopClipRect();
             }
 
             if( hover && ImGui::IsMouseHoveringRect( wpos + ImVec2( px0, offset ), wpos + ImVec2( px1, offset + tsz.y + 1 ) ) )
