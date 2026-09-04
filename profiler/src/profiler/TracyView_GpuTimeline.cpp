@@ -14,20 +14,6 @@ namespace tracy
 
 constexpr float MinVisSize = 3;
 
-std::string GetRiscName(RiscType risc) {
-    switch (risc) {
-        case RiscType::BRISC: return "BRISC";
-        case RiscType::NCRISC: return "NCRISC";
-        case RiscType::TRISC_0: return "TRISC_0";
-        case RiscType::TRISC_1: return "TRISC_1";
-        case RiscType::TRISC_2: return "TRISC_2";
-        case RiscType::ERISC: return "ERISC";
-        case RiscType::TENSIX_RISC_AGG: return "TENSIX_RISC_AGG";
-        case RiscType::NONE: return "";
-        default: return "UNKNOWN";
-    }
-}
-
 bool View::DrawGpu( const TimelineContext& ctx, const GpuCtxData& gpu, const std::vector<GpuLaneDraw>& lanes, int& offset )
 {
     const auto w = ctx.w;
@@ -46,8 +32,6 @@ bool View::DrawGpu( const TimelineContext& ctx, const GpuCtxData& gpu, const std
     const auto singleThread = gpu.threadData.size() == 1;
     const auto drift = GpuDrift( &gpu );
     int depth = 0;
-    constexpr int threadNameSize = 30;
-    char buf[threadNameSize];
 
     for( auto& lane : lanes )
     {
@@ -65,10 +49,8 @@ bool View::DrawGpu( const TimelineContext& ctx, const GpuCtxData& gpu, const std
         {
             if( !singleThread )
             {
-                TTDeviceMarker marker = TTDeviceMarker( (uint32_t)lane.tid );
-                snprintf( buf, threadNameSize, "%s", GetRiscName( marker.risc ).c_str() );
                 ImGui::PushFont( g_fonts.normal, FontSmall );
-                DrawTextContrast( draw, wpos + ImVec2( ty, offset-1-sstep ), 0xFFFFAAAA, buf );
+                DrawTextContrast( draw, wpos + ImVec2( ty, offset-1-sstep ), 0xFFFFAAAA, m_worker.GetThreadName( lane.tid ) );
                 DrawLine( draw, dpos + ImVec2( 0, offset+sty-sstep ), dpos + ImVec2( w, offset+sty-sstep ), 0x22FFAAAA );
                 ImGui::PopFont();
             }

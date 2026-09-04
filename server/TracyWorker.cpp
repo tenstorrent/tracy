@@ -6074,6 +6074,7 @@ void Worker::ProcessGpuZoneBeginImplCommon( GpuEvent* zone, const QueueGpuZoneBe
     if( td == ctx->threadData.end() )
     {
         td = ctx->threadData.emplace( ztid, GpuCtxThreadData {} ).first;
+        if( ztid != 0 ) CheckThreadString( ztid );
     }
     auto timeline = &td->second.timeline;
     auto& stack = td->second.stack;
@@ -6421,6 +6422,7 @@ void Worker::ProcessGpuZone( const QueueGpuZone& ev )
     if( td == ctx->threadData.end() )
     {
         td = ctx->threadData.emplace( ztid, GpuCtxThreadData {} ).first;
+        if( ztid != 0 ) CheckThreadString( ztid );
     }
     auto& tl = td->second.timeline;
 
