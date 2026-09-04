@@ -248,7 +248,15 @@ void View::DrawGpuZoneList( const TimelineContext& ctx, const std::vector<Timeli
                     }
                     if( IsMouseClicked( ImGuiMouseButton_Left ) )
                     {
-                        ShowZoneInfo( ev, zoneThread );
+                        if( ImGui::GetIO().KeyCtrl )
+                        {
+                            auto& srcloc = m_worker.GetSourceLocation( ev.SrcLoc() );
+                            ShowFindZoneGpu( ev.SrcLoc(), m_worker.GetString( srcloc.name.active ? srcloc.name : srcloc.function ) );
+                        }
+                        else
+                        {
+                            ShowZoneInfo( ev, zoneThread );
+                        }
                     }
 
                     m_gpuHover = &ev;
@@ -342,7 +350,15 @@ void View::DrawGpuZoneList( const TimelineContext& ctx, const std::vector<Timeli
                 }
                 if( IsMouseClicked( ImGuiMouseButton_Left ) )
                 {
-                    ShowZoneInfo( ev, zoneThread );
+                    if( ImGui::GetIO().KeyCtrl )
+                    {
+                        auto& srcloc = m_worker.GetSourceLocation( ev.SrcLoc() );
+                        ShowFindZoneGpu( ev.SrcLoc(), m_worker.GetString( srcloc.name.active ? srcloc.name : srcloc.function ) );
+                    }
+                    else
+                    {
+                        ShowZoneInfo( ev, zoneThread );
+                    }
                 }
 
                 m_gpuHover = &ev;
