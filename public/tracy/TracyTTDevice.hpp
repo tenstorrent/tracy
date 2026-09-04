@@ -54,12 +54,6 @@ using TracyTTCtx = void*;
 
 namespace tracy {
 
-    enum class EventPhase : uint8_t
-    {
-        Begin,
-        End
-    };
-
     inline int64_t m_tcpu = 0;
 
     static inline double get_tracy_timer_mul()
@@ -82,18 +76,12 @@ namespace tracy {
         m_tcpu = tcpu;
     }
 
-    struct EventInfo
-    {
-        TTDeviceMarker event;
-        EventPhase phase;
-    };
-
     class TTCtx
     {
     public:
         enum { QueryCount = 64 * 1024 };
 
-        TTCtx() : m_contextId(GetGpuCtxCounter().fetch_add(1, std::memory_order_relaxed)), m_head(0), m_tail(0) {}
+        TTCtx() : m_contextId(GetGpuCtxCounter().fetch_add(1, std::memory_order_relaxed)), m_head(0) {}
 
         void PopulateTTContext(int64_t tcpu, double tgpu, double frequency) {
             m_frequency = frequency;
@@ -224,20 +212,13 @@ namespace tracy {
             return m_contextId;
         }
 
-        tracy_force_inline unsigned int NextQueryId(EventInfo eventInfo)
+        // A query id only pairs a zone's begin or end item with its GpuTime item on the wire, where it travels as a
+        // uint16, so it wraps at QueryCount and nothing is kept per id.
+        tracy_force_inline unsigned int NextQueryId()
         {
             const auto id = m_head;
-            if ((m_head + 1) % QueryCount == m_tail) m_tail = m_head;
             m_head = (m_head + 1) % QueryCount;
-            TRACY_TT_ASSERT(m_head != m_tail);
-            m_query[id] = eventInfo;
             return id;
-        }
-
-        tracy_force_inline EventInfo& GetQuery(unsigned int id)
-        {
-            TRACY_TT_ASSERT(id < QueryCount);
-            return m_query[id];
         }
 
         std::string getRunIdString(const TTDeviceMarker& marker) {
@@ -319,7 +300,7 @@ namespace tracy {
             if (tracy::GetProfiler().IsEmitSuppressed()) {
                 return;
             }
-            const auto queryId = this->NextQueryId(EventInfo{marker, EventPhase::Begin});
+            const auto queryId = this->NextQueryId();
             const std::string run_id_string = this->getRunIdString(marker);
 
             const tracy::Color::ColorType color = this->getMarkerColor(marker);
@@ -469,7 +450,7 @@ namespace tracy {
             if (tracy::GetProfiler().IsEmitSuppressed()) {
                 return;
             }
-            const auto queryId = this->NextQueryId(EventInfo{marker, EventPhase::End});
+            const auto queryId = this->NextQueryId();
 
             auto zoneEnd = Profiler::QueueSerial();
             MemWrite(&zoneEnd->hdr.type, QueueType::GpuZoneEndSerial);
@@ -494,9 +475,7 @@ namespace tracy {
         uint64_t  mm_tcpu = 0;
         double m_frequency = 0;
 
-        EventInfo m_query[QueryCount];
-        unsigned int m_head; // index at which a new event should be inserted
-        unsigned int m_tail; // oldest event
+        unsigned int m_head; // the next query id
 
     };
 
