@@ -415,7 +415,7 @@ private:
     uint32_t GetZoneColor( const ZoneEvent& ev, uint64_t thread, int depth );
     uint32_t GetZoneColor( const GpuEvent& ev );
     ZoneColorData GetZoneColorData( const ZoneEvent& ev, uint64_t thread, int depth, uint32_t inheritedColor );
-    ZoneColorData GetZoneColorData( const GpuEvent& ev );
+    ZoneColorData GetZoneColorData( const GpuEvent& ev, uint32_t inheritedColor = 0 );
 
     void ZoomToZone( const ZoneEvent& ev );
     void ZoomToZone( const GpuEvent& ev );

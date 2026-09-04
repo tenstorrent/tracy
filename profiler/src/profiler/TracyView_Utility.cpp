@@ -133,10 +133,10 @@ View::ZoneColorData View::GetZoneColorData( const ZoneEvent& ev, uint64_t thread
     return ret;
 }
 
-View::ZoneColorData View::GetZoneColorData( const GpuEvent& ev )
+View::ZoneColorData View::GetZoneColorData( const GpuEvent& ev, uint32_t inheritedColor )
 {
     ZoneColorData ret;
-    const auto color = GetZoneColor( ev );
+    const auto color = inheritedColor ? inheritedColor : GetZoneColor( ev );
     ret.color = color;
     if( m_gpuInfoWindow == &ev )
     {

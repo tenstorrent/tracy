@@ -38,10 +38,10 @@ protected:
 
 private:
     void PreprocessLane( const TimelineContext& ctx, const GpuCtxThreadData& td, bool visible, int drift, GpuLaneDraw& lane );
-    int PreprocessZoneLevel( const TimelineContext& ctx, const Vector<short_ptr<GpuEvent>>& vec, int depth, bool visible, int64_t begin, int drift, std::vector<TimelineDraw>& draw );
+    int PreprocessZoneLevel( const TimelineContext& ctx, const Vector<short_ptr<GpuEvent>>& vec, int depth, bool visible, int64_t begin, int drift, uint32_t inheritedColor, std::vector<TimelineDraw>& draw );
 
     template<typename Adapter, typename V>
-    int PreprocessZoneLevel( const TimelineContext& ctx, const V& vec, int depth, bool visible, int64_t begin, int drift, std::vector<TimelineDraw>& draw );
+    int PreprocessZoneLevel( const TimelineContext& ctx, const V& vec, int depth, bool visible, int64_t begin, int drift, uint32_t inheritedColor, std::vector<TimelineDraw>& draw );
 
     GpuCtxData* m_gpu;
     int m_idx;

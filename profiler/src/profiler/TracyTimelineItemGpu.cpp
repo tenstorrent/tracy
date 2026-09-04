@@ -1,5 +1,6 @@
 #include <algorithm>
 
+#include "TracyColor.hpp"
 #include "TracyGallop.hpp"
 #include "TracyImGui.hpp"
 #include "TracyPopcnt.hpp"
@@ -250,7 +251,7 @@ void TimelineItemGpu::PreprocessLane( const TimelineContext& ctx, const GpuCtxTh
     {
         lane.begin = tl.is_magic() ? ((Vector<GpuEvent>*)&tl)->front().GpuStart() : tl.front()->GpuStart();
     }
-    lane.depth = lane.begin >= 0 ? PreprocessZoneLevel( ctx, tl, 0, visible, lane.begin, drift, lane.draw ) : 0;
+    lane.depth = lane.begin >= 0 ? PreprocessZoneLevel( ctx, tl, 0, visible, lane.begin, drift, 0, lane.draw ) : 0;
 }
 
 void TimelineItemGpu::DrawFinished()
@@ -263,20 +264,20 @@ bool TimelineItemGpu::DrawContents( const TimelineContext& ctx, int& offset )
     return m_view.DrawGpu( ctx, *m_gpu, m_lanes, offset );
 }
 
-int TimelineItemGpu::PreprocessZoneLevel( const TimelineContext& ctx, const Vector<short_ptr<GpuEvent>>& vec, int depth, bool visible, int64_t begin, int drift, std::vector<TimelineDraw>& draw )
+int TimelineItemGpu::PreprocessZoneLevel( const TimelineContext& ctx, const Vector<short_ptr<GpuEvent>>& vec, int depth, bool visible, int64_t begin, int drift, uint32_t inheritedColor, std::vector<TimelineDraw>& draw )
 {
     if( vec.is_magic() )
     {
-        return PreprocessZoneLevel<VectorAdapterDirect<GpuEvent>>( ctx, *(Vector<GpuEvent>*)( &vec ), depth, visible, begin, drift, draw );
+        return PreprocessZoneLevel<VectorAdapterDirect<GpuEvent>>( ctx, *(Vector<GpuEvent>*)( &vec ), depth, visible, begin, drift, inheritedColor, draw );
     }
     else
     {
-        return PreprocessZoneLevel<VectorAdapterPointer<GpuEvent>>( ctx, vec, depth, visible, begin, drift, draw );
+        return PreprocessZoneLevel<VectorAdapterPointer<GpuEvent>>( ctx, vec, depth, visible, begin, drift, inheritedColor, draw );
     }
 }
 
 template<typename Adapter, typename V>
-int TimelineItemGpu::PreprocessZoneLevel( const TimelineContext& ctx, const V& vec, int depth, bool visible, int64_t begin, int drift, std::vector<TimelineDraw>& draw )
+int TimelineItemGpu::PreprocessZoneLevel( const TimelineContext& ctx, const V& vec, int depth, bool visible, int64_t begin, int drift, uint32_t inheritedColor, std::vector<TimelineDraw>& draw )
 {
     if( depth >= 256 ) return depth;
 
@@ -318,17 +319,28 @@ int TimelineItemGpu::PreprocessZoneLevel( const TimelineContext& ctx, const V& v
                 if( nt - pt >= MinVisNs ) break;
                 nextTime = nt + MinVisNs;
             }
-            if( visible ) draw.emplace_back( TimelineDraw { TimelineDrawType::Folded, uint16_t( depth ), (void**)&ev, m_worker.GetZoneEnd( a(*(next-1)) ), uint32_t( next - it ), 0 } );
+            if( visible ) draw.emplace_back( TimelineDraw { TimelineDrawType::Folded, uint16_t( depth ), (void**)&ev, m_worker.GetZoneEnd( a(*(next-1)) ), uint32_t( next - it ), inheritedColor } );
             it = next;
         }
         else
         {
+            auto currentInherited = inheritedColor;
+            auto childrenInherited = inheritedColor;
+            if( m_view.GetViewData().inheritParentColors )
+            {
+                const auto color = m_worker.GetSourceLocation( ev.SrcLoc() ).color;
+                if( color != 0 )
+                {
+                    currentInherited = color | 0xFF000000;
+                    if( ev.Child() >= 0 ) childrenInherited = DarkenColorSlightly( color );
+                }
+            }
             if( ev.Child() >= 0 )
             {
-                const auto d = PreprocessZoneLevel( ctx, m_worker.GetGpuChildren( ev.Child() ), depth + 1, visible, begin, drift, draw );
+                const auto d = PreprocessZoneLevel( ctx, m_worker.GetGpuChildren( ev.Child() ), depth + 1, visible, begin, drift, childrenInherited, draw );
                 if( d > maxdepth ) maxdepth = d;
             }
-            if( visible ) draw.emplace_back( TimelineDraw { TimelineDrawType::Zone, uint16_t( depth ), (void**)&ev, 0, 0, 0 } );
+            if( visible ) draw.emplace_back( TimelineDraw { TimelineDrawType::Zone, uint16_t( depth ), (void**)&ev, 0, 0, currentInherited } );
             ++it;
         }
     }

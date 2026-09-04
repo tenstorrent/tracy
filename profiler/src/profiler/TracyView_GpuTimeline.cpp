@@ -215,7 +215,7 @@ void View::DrawGpuZoneList( const TimelineContext& ctx, const std::vector<Timeli
         {
         case TimelineDrawType::Folded:
         {
-            const auto color = GetZoneColor( ev );
+            const auto color = v.inheritedColor ? v.inheritedColor : GetZoneColor( ev );
             const auto rend = AdjustGpuTime( v.rend.Val(), begin, drift );
             const auto px0 = ( start - vStart ) * pxns;
             const auto px1 = ( rend - vStart ) * pxns;
@@ -223,6 +223,7 @@ void View::DrawGpuZoneList( const TimelineContext& ctx, const std::vector<Timeli
             DrawZigZag( draw, wpos + ImVec2( 0, offset + ty/2 ), std::max( px0, -10.0 ), std::min( std::max( px1, px0+MinVisSize ), double( w + 10 ) ), ty/4, DarkenColor( color ) );
             if( hover && ImGui::IsMouseHoveringRect( wpos + ImVec2( std::max( px0, -10.0 ), offset ), wpos + ImVec2( std::min( std::max( px1, px0+MinVisSize ), double( w + 10 ) ), offset + ty + 1 ) ) )
             {
+                if( IsMouseClickReleased( ImGuiMouseButton_Right ) ) m_setRangePopup = RangeSlim { start, rend, true };
                 if( v.num > 1 )
                 {
                     ImGui::BeginTooltip();
@@ -284,7 +285,7 @@ void View::DrawGpuZoneList( const TimelineContext& ctx, const std::vector<Timeli
             {
                 zoneName = ShortenZoneName( m_vd.shortenName, zoneName, tsz, zsz );
             }
-            const auto zoneColor = GetZoneColorData( ev );
+            const auto zoneColor = GetZoneColorData( ev, v.inheritedColor );
             draw->AddRectFilled( wpos + ImVec2( px0, offset ), wpos + ImVec2( px1, offset + tsz.y ), zoneColor.color );
             if( zoneColor.highlight )
             {
@@ -333,6 +334,7 @@ void View::DrawGpuZoneList( const TimelineContext& ctx, const std::vector<Timeli
             {
                 const auto zoneThread = thread != 0 ? thread : m_worker.DecompressThread( ev.Thread() );
                 ZoneTooltip( ev );
+                if( IsMouseClickReleased( ImGuiMouseButton_Right ) ) m_setRangePopup = RangeSlim { start, end, true };
 
                 if( !m_zoomAnim.active && IsMouseClicked( ImGuiMouseButton_Middle ) )
                 {
