@@ -2,6 +2,7 @@
 #include <limits>
 
 #include "TracyColor.hpp"
+#include "TracyGallop.hpp"
 #include "TracyImGui.hpp"
 #include "TracyLockHelpers.hpp"
 #include "TracyMouse.hpp"
@@ -503,7 +504,7 @@ int TimelineItemThread::PreprocessZoneLevel( const TimelineContext& ctx, const V
             auto next = it + 1;
             for(;;)
             {
-                next = std::lower_bound( next, zitend, nextTime, [this] ( const auto& l, const auto& r ) { Adapter a; return m_worker.GetZoneEnd( a(l) ) < r; } );
+                next = gallop_lower_bound( next, zitend, nextTime, [this] ( const auto& l, const auto& r ) { Adapter a; return m_worker.GetZoneEnd( a(l) ) < r; } );
                 if( next == zitend ) break;
                 auto prev = next - 1;
                 const auto pt = m_worker.GetZoneEnd( a(*prev) );

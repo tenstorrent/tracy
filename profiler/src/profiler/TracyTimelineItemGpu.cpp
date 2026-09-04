@@ -1,5 +1,6 @@
 #include <algorithm>
 
+#include "TracyGallop.hpp"
 #include "TracyImGui.hpp"
 #include "TracyPopcnt.hpp"
 #include "TracyPrint.hpp"
@@ -310,7 +311,7 @@ int TimelineItemGpu::PreprocessZoneLevel( const TimelineContext& ctx, const V& v
             auto next = it + 1;
             for(;;)
             {
-                next = std::lower_bound( next, zitend, std::max<int64_t>( 0, nextTime ), [&zoneEnd] ( const auto& l, const auto& r ) { Adapter a; return zoneEnd( a(l) ) < (uint64_t)r; } );
+                next = gallop_lower_bound( next, zitend, std::max<int64_t>( 0, nextTime ), [&zoneEnd] ( const auto& l, const auto& r ) { Adapter a; return zoneEnd( a(l) ) < (uint64_t)r; } );
                 if( next == zitend ) break;
                 const auto pt = View::AdjustGpuTime( m_worker.GetZoneEnd( a(*(next-1)) ), begin, drift );
                 const auto nt = View::AdjustGpuTime( m_worker.GetZoneEnd( a(*next) ), begin, drift );
