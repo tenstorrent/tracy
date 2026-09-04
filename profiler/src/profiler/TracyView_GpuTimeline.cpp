@@ -41,7 +41,8 @@ bool View::DrawGpu( const TimelineContext& ctx, const GpuCtxData& gpu, const std
         if( !singleThread ) offset += sstep;
 
         // Marker row goes above the lane's zones, the way messages sit above a thread's zones.
-        const int markerRows = DrawGpuMarkers( ctx, td->second.markers, offset, begin, drift ) ? 1 : 0;
+        const int markerRows = lane.markers ? 1 : 0;
+        if( lane.markers ) DrawGpuMarkers( ctx, td->second.markers, offset, begin, drift );
         if( lane.depth != 0 ) DrawGpuZoneList( ctx, lane.draw, offset + ostep * markerRows, gpu.thread, begin, drift );
 
         const int rows = lane.depth + markerRows;

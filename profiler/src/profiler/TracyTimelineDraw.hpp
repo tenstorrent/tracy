@@ -36,6 +36,7 @@ struct GpuLaneDraw
     uint64_t tid;
     int64_t begin;
     int depth;
+    bool markers;   // the lane's device-marker row has something in view
     std::vector<TimelineDraw> draw;
 };
 

@@ -226,7 +226,7 @@ void TimelineItemGpu::Preprocess( const TimelineContext& ctx, TaskDispatch& td, 
     {
         m_lanes.clear();
         m_lanes.reserve( m_gpu->threadData.size() );
-        for( auto& t : m_gpu->threadData ) m_lanes.emplace_back( GpuLaneDraw { t.first, -1, 0, {} } );
+        for( auto& t : m_gpu->threadData ) m_lanes.emplace_back( GpuLaneDraw { t.first, -1, 0, false, {} } );
         std::sort( m_lanes.begin(), m_lanes.end(), [] ( const auto& l, const auto& r ) { return l.tid < r.tid; } );
     }
     // GpuDrift may insert into the view's drift map, so resolve it here on the main thread.
@@ -252,6 +252,19 @@ void TimelineItemGpu::PreprocessLane( const TimelineContext& ctx, const GpuCtxTh
         lane.begin = tl.is_magic() ? ((Vector<GpuEvent>*)&tl)->front().GpuStart() : tl.front()->GpuStart();
     }
     lane.depth = lane.begin >= 0 ? PreprocessZoneLevel( ctx, tl, 0, visible, lane.begin, drift, 0, lane.draw ) : 0;
+
+    const auto begin = lane.begin >= 0 ? lane.begin : 0;
+    lane.markers = false;
+    auto& mv = td.markers;
+    if( !mv.empty() )
+    {
+        auto it = std::lower_bound( mv.begin(), mv.end(), ctx.vStart, [begin, drift] ( const auto& lhs, const auto& rhs ) { return View::AdjustGpuTime( lhs->gpuTime, begin, drift ) < rhs; } );
+        if( it != mv.end() )
+        {
+            const auto zitend = std::lower_bound( it, mv.end(), ctx.vEnd+1, [begin, drift] ( const auto& lhs, const auto& rhs ) { return View::AdjustGpuTime( lhs->gpuTime, begin, drift ) < rhs; } );
+            lane.markers = it != zitend;
+        }
+    }
 }
 
 void TimelineItemGpu::DrawFinished()
