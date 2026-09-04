@@ -25,6 +25,12 @@ public:
 
     bool WantPreprocess() const { return m_wantPreprocess; }
     virtual void Preprocess( const TimelineContext& ctx, TaskDispatch& td, bool visible, int yPos ) { assert( false ); }
+    // An item whose measurement is costly may defer it while off-screen: the controller then brings such items
+    // current a few per frame, so their heights lag a view change by a fraction of a second instead of every item
+    // being measured every frame.
+    virtual bool MeasureOffscreenLazily() const { return false; }
+    // Whether the last measurement still holds for this view; only consulted for lazily measured items.
+    virtual bool MeasureIsCurrent( const TimelineContext& ctx ) const { return false; }
 
     void VisibilityCheckbox();
     virtual void SetVisible( bool visible ) { m_visible = visible; }

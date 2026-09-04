@@ -229,6 +229,10 @@ void TimelineItemGpu::Preprocess( const TimelineContext& ctx, TaskDispatch& td, 
         for( auto& t : m_gpu->threadData ) m_lanes.emplace_back( GpuLaneDraw { t.first, -1, 0, false, {} } );
         std::sort( m_lanes.begin(), m_lanes.end(), [] ( const auto& l, const auto& r ) { return l.tid < r.tid; } );
     }
+    m_measuredStart = ctx.vStart;
+    m_measuredEnd = ctx.vEnd;
+    m_measuredNspx = ctx.nspx;
+    m_measuredCount = m_gpu->count;
     // GpuDrift may insert into the view's drift map, so resolve it here on the main thread.
     const int drift = m_view.GetGpuDrift( m_gpu );
     for( auto& lane : m_lanes )
@@ -241,6 +245,11 @@ void TimelineItemGpu::Preprocess( const TimelineContext& ctx, TaskDispatch& td, 
             PreprocessLane( ctx, *tdata, visible, drift, lane );
         } );
     }
+}
+
+bool TimelineItemGpu::MeasureIsCurrent( const TimelineContext& ctx ) const
+{
+    return ctx.vStart == m_measuredStart && ctx.vEnd == m_measuredEnd && ctx.nspx == m_measuredNspx && m_gpu->count == m_measuredCount;
 }
 
 void TimelineItemGpu::PreprocessLane( const TimelineContext& ctx, const GpuCtxThreadData& td, bool visible, int drift, GpuLaneDraw& lane )

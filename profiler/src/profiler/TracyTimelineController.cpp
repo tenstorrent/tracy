@@ -11,6 +11,11 @@
 namespace tracy
 {
 
+// Off-screen items measured per frame when they defer measurement. A GPU context is five lanes at ~50 us each on a
+// worker, so 64 contexts is ~16 ms of worker time per frame spread over the pool, and a 1000-context trace is
+// current again ~17 frames after a view change.
+constexpr int LazyMeasureBudget = 64;
+
 TimelineController::TimelineController( View& view, Worker& worker, bool threading )
     : m_height( 0 )
     , m_scroll( 0 )
@@ -139,13 +144,22 @@ void TimelineController::End( double pxns, const ImVec2& wpos, bool hover, bool 
     ctx.hover = hover;
 
     int yOffset = 0;
+    int lazyBudget = LazyMeasureBudget;
     for( auto& item : m_items )
     {
         if( item->WantPreprocess() && item->IsVisible() )
         {
             const auto yPos = wpos.y + yOffset;
             const bool visible = m_firstFrame || ( yPos < yMax && yPos + item->GetHeight() >= yMin );
-            item->Preprocess( ctx, m_td, visible, yPos );
+            if( visible || !item->MeasureOffscreenLazily() )
+            {
+                item->Preprocess( ctx, m_td, visible, yPos );
+            }
+            else if( lazyBudget > 0 && !item->MeasureIsCurrent( ctx ) )
+            {
+                item->Preprocess( ctx, m_td, false, yPos );
+                lazyBudget--;
+            }
         }
         yOffset += m_firstFrame ? 0 : item->GetHeight();
     }

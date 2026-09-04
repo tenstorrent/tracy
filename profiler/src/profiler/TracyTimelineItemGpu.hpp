@@ -35,6 +35,8 @@ protected:
     bool IsEmpty() const override;
 
     void Preprocess( const TimelineContext& ctx, TaskDispatch& td, bool visible, int yPos ) override;
+    bool MeasureOffscreenLazily() const override { return true; }
+    bool MeasureIsCurrent( const TimelineContext& ctx ) const override;
 
 private:
     void PreprocessLane( const TimelineContext& ctx, const GpuCtxThreadData& td, bool visible, int drift, GpuLaneDraw& lane );
@@ -46,6 +48,10 @@ private:
     GpuCtxData* m_gpu;
     int m_idx;
     std::vector<GpuLaneDraw> m_lanes;
+    int64_t m_measuredStart = 0;
+    int64_t m_measuredEnd = 0;
+    double m_measuredNspx = 0;
+    uint64_t m_measuredCount = 0;
 };
 
 }

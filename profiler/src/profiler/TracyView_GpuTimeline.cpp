@@ -48,7 +48,7 @@ bool View::DrawGpu( const TimelineContext& ctx, const GpuCtxData& gpu, const std
         const int rows = lane.depth + markerRows;
         if( rows != 0 )
         {
-            if( !singleThread )
+            if( !singleThread && wpos.y + offset - sstep <= ctx.yMax && wpos.y + offset >= ctx.yMin )
             {
                 ImGui::PushFont( g_fonts.normal, FontSmall );
                 DrawTextContrast( draw, wpos + ImVec2( ty, offset-1-sstep ), 0xFFFFAAAA, m_worker.GetThreadName( lane.tid ) );
