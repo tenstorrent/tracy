@@ -98,14 +98,9 @@ namespace tracy {
             MemWrite(&item->gpuNewContext.period, (float)1.0f);
             MemWrite(&item->gpuNewContext.type, GpuContextType::tt_device);
             MemWrite(&item->gpuNewContext.context, GetId());
-            // No GPU drift-calibration for tt_device contexts. The Tensix wall clock is a free-running
-            // ABSOLUTE counter that (after / frequency) is already in nanoseconds at the host clock's rate,
-            // so an anchor-only mapping (server: gpuTime = tgpu + timeDiff) is exact. With the calibration
-            // flag set, the server instead derives a drift scale (calibrationMod) from the FIRST calibration
-            // delta -- but our anchor gpuTime is ~0 while device timestamps are absolute (~5e9 ns), so that
-            // delta is bogus and calibrationMod comes out ~0.11, shrinking every zone duration ~9x. Omitting
-            // the flag keeps durations correct (was GpuContextCalibration).
-            MemWrite(&item->gpuNewContext.flags, GpuContextFlags{});
+            // GpuContextCalibration: each CalibrateTTContext re-anchors the server's device->host mapping (the real-time
+            // and DRAM profilers rely on it); a frozen-anchor consumer uses PopulateTTContextCalibrated and never calibrates.
+            MemWrite(&item->gpuNewContext.flags, GpuContextCalibration);
             Profiler::QueueSerialFinish();
 
             mm_tcpu = tcpu;
