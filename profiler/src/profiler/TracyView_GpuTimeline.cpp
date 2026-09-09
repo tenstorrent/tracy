@@ -71,7 +71,7 @@ static const char* GpuMarkerTypeName( uint8_t type )
     switch( (TTDeviceMarkerType)type )
     {
     case TTDeviceMarkerType::DATA: return "data";
-    case TTDeviceMarkerType::FLAG: return "flag";
+    case TTDeviceMarkerType::EVENT: return "event";
     case TTDeviceMarkerType::RUNTIME_EVENT: return "runtime event";
     // Legacy DRAM-readback names, still produced by that path.
     case TTDeviceMarkerType::TS_EVENT: return "TS_EVENT";
@@ -88,7 +88,7 @@ static uint32_t GpuMarkerColor( uint8_t type )
     switch( (TTDeviceMarkerType)type )
     {
     case TTDeviceMarkerType::DATA:          return 0xFFB49678;  // slate blue
-    case TTDeviceMarkerType::FLAG:          return 0xFF82A582;  // sage green
+    case TTDeviceMarkerType::EVENT:         return 0xFF82A582;  // sage green
     case TTDeviceMarkerType::RUNTIME_EVENT: return 0xFF6EA0BE;  // muted amber
     default:                                return 0xFFA08C8C;  // legacy DRAM markers: neutral grey
     }
