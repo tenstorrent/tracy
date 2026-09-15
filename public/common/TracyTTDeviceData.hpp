@@ -149,9 +149,13 @@ struct TTDeviceMarker {
     static constexpr uint64_t CORE_Y_BIT_SHIFT = CORE_X_BIT_SHIFT + CORE_X_BIT_COUNT;
     static constexpr uint64_t CHIP_BIT_SHIFT = CORE_Y_BIT_SHIFT + CORE_Y_BIT_COUNT;
 
+    // Lane ids share Tracy's thread-id space with host threads, whose Linux ids stay below 2^22; this bit keeps a
+    // lane from ever aliasing a host thread and sharing its name.
+    static constexpr uint32_t LANE_ID_FLAG = 1u << 31;
+
     static constexpr uint64_t INVALID_NUM = 1LL << 63;
 
-    static_assert((RISC_BIT_COUNT + CORE_X_BIT_COUNT + CORE_Y_BIT_COUNT + CHIP_BIT_COUNT) <= (sizeof(uint32_t) * 8));
+    static_assert((RISC_BIT_COUNT + CORE_X_BIT_COUNT + CORE_Y_BIT_COUNT + CHIP_BIT_COUNT) < (sizeof(uint32_t) * 8));
 
     uint64_t runtime_host_id;
     uint64_t trace_id;
@@ -318,7 +322,7 @@ struct TTDeviceMarker {
         uint32_t threadID =
             risc_bits | core_x << CORE_X_BIT_SHIFT | core_y << CORE_Y_BIT_SHIFT | chip_id << CHIP_BIT_SHIFT;
 
-        return threadID;
+        return LANE_ID_FLAG | threadID;
     }
 };
 }  // namespace tracy

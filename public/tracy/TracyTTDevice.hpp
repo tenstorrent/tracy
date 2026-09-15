@@ -13,6 +13,7 @@
 #define TracyTTPushStartZone(c, e)
 #define TracyTTPushEndZone(c, e)
 #define TracyTTPushMarker(c, e)
+#define TracyTTPushMarkerLockfree(c, e)
 #define TracyTTPushZone(c, s, t, b, e)
 #define TracyTTPushZoneSerial(c, s, t, b, e)
 
@@ -53,12 +54,6 @@ using TracyTTCtx = void*;
 
 namespace tracy {
 
-    enum class EventPhase : uint8_t
-    {
-        Begin,
-        End
-    };
-
     inline int64_t m_tcpu = 0;
 
     static inline double get_tracy_timer_mul()
@@ -81,18 +76,12 @@ namespace tracy {
         m_tcpu = tcpu;
     }
 
-    struct EventInfo
-    {
-        TTDeviceMarker event;
-        EventPhase phase;
-    };
-
     class TTCtx
     {
     public:
         enum { QueryCount = 64 * 1024 };
 
-        TTCtx() : m_contextId(GetGpuCtxCounter().fetch_add(1, std::memory_order_relaxed)), m_head(0), m_tail(0) {}
+        TTCtx() : m_contextId(GetGpuCtxCounter().fetch_add(1, std::memory_order_relaxed)), m_head(0) {}
 
         void PopulateTTContext(int64_t tcpu, double tgpu, double frequency) {
             m_frequency = frequency;
@@ -218,20 +207,13 @@ namespace tracy {
             return m_contextId;
         }
 
-        tracy_force_inline unsigned int NextQueryId(EventInfo eventInfo)
+        // A query id only pairs a zone's begin or end item with its GpuTime item on the wire, where it travels as a
+        // uint16, so it wraps at QueryCount and nothing is kept per id.
+        tracy_force_inline unsigned int NextQueryId()
         {
             const auto id = m_head;
-            if ((m_head + 1) % QueryCount == m_tail) m_tail = m_head;
             m_head = (m_head + 1) % QueryCount;
-            TRACY_TT_ASSERT(m_head != m_tail);
-            m_query[id] = eventInfo;
             return id;
-        }
-
-        tracy_force_inline EventInfo& GetQuery(unsigned int id)
-        {
-            TRACY_TT_ASSERT(id < QueryCount);
-            return m_query[id];
         }
 
         std::string getRunIdString(const TTDeviceMarker& marker) {
@@ -313,7 +295,7 @@ namespace tracy {
             if (tracy::GetProfiler().IsEmitSuppressed()) {
                 return;
             }
-            const auto queryId = this->NextQueryId(EventInfo{marker, EventPhase::Begin});
+            const auto queryId = this->NextQueryId();
             const std::string run_id_string = this->getRunIdString(marker);
 
             const tracy::Color::ColorType color = this->getMarkerColor(marker);
@@ -349,6 +331,9 @@ namespace tracy {
         // source location carries only the event's identity so that the server interns one per event
         // type; everything that varies per event goes in the metadata string.
         void PushMarker(const TTDeviceMarker& marker) {
+            if (tracy::GetProfiler().IsEmitSuppressed()) {
+                return;
+            }
             const tracy::Color::ColorType color = this->getMarkerColor(marker);
 
             const auto srcloc = Profiler::AllocSourceLocation(
@@ -383,6 +368,47 @@ namespace tracy {
             MemWrite(&item->gpuMarker.context, this->GetId());
             MemWrite(&item->gpuMarker.markerType, (uint8_t)marker.marker_type);
             Profiler::QueueSerialFinish();
+        }
+
+        // Lock-free twin of PushMarker. Use only when this context was also created lock-free on this
+        // thread: the client drains the lock-free queues before the serial one, and they are per-thread,
+        // so either mismatch lets a marker reach the server ahead of the context it references.
+        void PushMarkerLockfree(const TTDeviceMarker& marker) {
+            if (tracy::GetProfiler().IsEmitSuppressed()) {
+                return;
+            }
+            const tracy::Color::ColorType color = this->getMarkerColor(marker);
+
+            const auto srcloc = Profiler::AllocSourceLocation(
+                marker.line,
+                marker.file.c_str(),
+                marker.file.length(),
+                "",
+                0,
+                marker.marker_name.c_str(),
+                marker.marker_name.length(),
+                color);
+
+            const std::string meta = this->getMarkerMetaString(marker);
+            if (!meta.empty()) {
+                const uint16_t metaLen = (uint16_t)std::min<size_t>(meta.length(), std::numeric_limits<uint16_t>::max());
+                auto ptr = (char*)tracy_malloc(metaLen);
+                memcpy(ptr, meta.c_str(), metaLen);
+
+                TracyLfqPrepare(QueueType::GpuMarkerMeta);
+                MemWrite(&item->gpuMarkerMetaFat.context, this->GetId());
+                MemWrite(&item->gpuMarkerMetaFat.ptr, (uint64_t)ptr);
+                MemWrite(&item->gpuMarkerMetaFat.size, metaLen);
+                TracyLfqCommit;
+            }
+
+            TracyLfqPrepare(QueueType::GpuMarker);
+            MemWrite(&item->gpuMarker.gpuTime, (int64_t)round((double)marker.timestamp / m_frequency));
+            MemWrite(&item->gpuMarker.srcloc, srcloc);
+            MemWrite(&item->gpuMarker.thread, (uint32_t)marker.get_thread_id());
+            MemWrite(&item->gpuMarker.context, this->GetId());
+            MemWrite(&item->gpuMarker.markerType, (uint8_t)marker.marker_type);
+            TracyLfqCommit;
         }
 
         // Per (context, thread), calls must arrive in zone completion order (i.e., sorted by `end`); the server rebuilds nesting from that ordering.
@@ -425,7 +451,7 @@ namespace tracy {
             if (tracy::GetProfiler().IsEmitSuppressed()) {
                 return;
             }
-            const auto queryId = this->NextQueryId(EventInfo{marker, EventPhase::End});
+            const auto queryId = this->NextQueryId();
 
             auto zoneEnd = Profiler::QueueSerial();
             MemWrite(&zoneEnd->hdr.type, QueueType::GpuZoneEndSerial);
@@ -450,9 +476,7 @@ namespace tracy {
         uint64_t  mm_tcpu = 0;
         double m_frequency = 0;
 
-        EventInfo m_query[QueryCount];
-        unsigned int m_head; // index at which a new event should be inserted
-        unsigned int m_tail; // oldest event
+        unsigned int m_head; // the next query id
 
     };
 
@@ -487,6 +511,7 @@ using TracyTTCtx = tracy::TTCtx*;
 #define TracyTTPushStartMarker(ctx, marker) ctx->PushStartMarker(marker)
 #define TracyTTPushEndMarker(ctx, marker) ctx->PushEndMarker(marker)
 #define TracyTTPushMarker(ctx, marker) ctx->PushMarker(marker)
+#define TracyTTPushMarkerLockfree(ctx, marker) ctx->PushMarkerLockfree(marker)
 #define TracyTTPushZone(ctx, srcloc, thread, start, end) ctx->PushZone(srcloc, thread, start, end)
 #define TracyTTPushZoneSerial(ctx, srcloc, thread, start, end) ctx->PushZoneSerial(srcloc, thread, start, end)
 

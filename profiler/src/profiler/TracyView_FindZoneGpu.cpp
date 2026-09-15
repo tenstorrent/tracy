@@ -270,8 +270,6 @@ void View::DrawFindZoneGpu()
     const auto limitRange = m_findZone.range.active;
     const auto limitCtx = m_gpuCtxLimit;
 
-    auto& slz = m_worker.GetGpuSourceLocationZones();
-
     bool expand = ImGui::TreeNodeEx( "Matched source locations", ImGuiTreeNodeFlags_DefaultOpen );
     ImGui::SameLine();
     ImGui::TextDisabled( "(%zu)", m_findZoneGpu.match.size() );
@@ -282,7 +280,7 @@ void View::DrawFindZoneGpu()
         for( auto& v : m_findZoneGpu.match )
         {
             auto& srcloc = m_worker.GetSourceLocation( v );
-            auto& zones = slz.find( v )->second.zones;
+            auto& zones = m_worker.GetGpuZonesForSourceLocation( v ).zones;
             SmallColorBox( GetSrcLocColor( srcloc, 0 ) );
             ImGui::SameLine();
             ImGui::PushID( idx );
