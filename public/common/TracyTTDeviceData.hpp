@@ -28,7 +28,7 @@ enum class RiscType : uint8_t {
                       // defined on the device
     NONE,             // No RISC label displayed (used for host-side telemetry contexts)
     // Quasar Tensix processors, ordered like internal_::get_hw_thread_idx() on the device:
-    // DM0..DM7, then Neo0..Neo3 x TRISC0..TRISC3.
+    // DM0..DM7, then Neo0..Neo3 x TRISC0..TRISC3. Occupies 8..31.
     QUASAR_DM0,
     QUASAR_DM1,
     QUASAR_DM2,
@@ -52,10 +52,27 @@ enum class RiscType : uint8_t {
     QUASAR_NEO3_TRISC0,
     QUASAR_NEO3_TRISC1,
     QUASAR_NEO3_TRISC2,
-    QUASAR_NEO3_TRISC3,
+    QUASAR_NEO3_TRISC3
 };
 
-enum class TTDeviceMarkerType : uint8_t { ZONE_START, ZONE_END, ZONE_TOTAL, TS_DATA, TS_EVENT, TS_DATA_16B };
+// ZONE_* are durations. The rest are point markers, and they differ by where the marker's ID comes
+// from, because that decides whether the host can resolve a NAME for it:
+//   DATA / EVENT  -- compile-time tag: the id is a source-location hash, so a name exists. DATA carries a
+//                    payload (DeviceTimestampedData), EVENT is bare (DeviceRecordEvent).
+//   RUNTIME_EVENT -- runtime id: an ordinary value from the kernel. NO name exists, and it must never be
+//                    looked up in the hash->name map or it would borrow an unrelated zone's name.
+// TS_DATA / TS_EVENT / TS_DATA_16B are the legacy DRAM-readback names, kept for that path only.
+enum class TTDeviceMarkerType : uint8_t {
+    ZONE_START,
+    ZONE_END,
+    ZONE_TOTAL,
+    TS_DATA,
+    TS_EVENT,
+    TS_DATA_16B,
+    DATA,
+    EVENT,
+    RUNTIME_EVENT
+};
 
 struct MarkerDetails {
     enum class MarkerNameKeyword : uint16_t {
@@ -120,7 +137,8 @@ struct MarkerDetails {
 const MarkerDetails UnidentifiedMarkerDetails = MarkerDetails("", "", 0);
 
 struct TTDeviceMarker {
-    static constexpr uint64_t RISC_BIT_COUNT = 3;
+    // 0..63: 0-7 Tensix/eth/none, 8-31 Quasar processors.
+    static constexpr uint64_t RISC_BIT_COUNT = 6;
     static constexpr uint64_t CORE_X_BIT_COUNT = 4;
     static constexpr uint64_t CORE_Y_BIT_COUNT = 4;
     static constexpr uint64_t CHIP_BIT_COUNT = 8;
@@ -129,9 +147,13 @@ struct TTDeviceMarker {
     static constexpr uint64_t CORE_Y_BIT_SHIFT = CORE_X_BIT_SHIFT + CORE_X_BIT_COUNT;
     static constexpr uint64_t CHIP_BIT_SHIFT = CORE_Y_BIT_SHIFT + CORE_Y_BIT_COUNT;
 
+    // Lane ids share Tracy's thread-id space with host threads, whose Linux ids stay below 2^22; this bit keeps a
+    // lane from ever aliasing a host thread and sharing its name.
+    static constexpr uint32_t LANE_ID_FLAG = 1u << 31;
+
     static constexpr uint64_t INVALID_NUM = 1LL << 63;
 
-    static_assert((RISC_BIT_COUNT + CORE_X_BIT_COUNT + CORE_Y_BIT_COUNT + CHIP_BIT_COUNT) <= (sizeof(uint32_t) * 8));
+    static_assert((RISC_BIT_COUNT + CORE_X_BIT_COUNT + CORE_Y_BIT_COUNT + CHIP_BIT_COUNT) < (sizeof(uint32_t) * 8));
 
     uint64_t runtime_host_id;
     uint64_t trace_id;
@@ -298,7 +320,7 @@ struct TTDeviceMarker {
         uint32_t threadID =
             risc_bits | core_x << CORE_X_BIT_SHIFT | core_y << CORE_Y_BIT_SHIFT | chip_id << CHIP_BIT_SHIFT;
 
-        return threadID;
+        return LANE_ID_FLAG | threadID;
     }
 };
 }  // namespace tracy

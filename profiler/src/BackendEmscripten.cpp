@@ -162,6 +162,37 @@ static ImGuiKey TranslateKeyCode( const char* code )
     return ImGuiKey_None;
 }
 
+static void UpdateKeyModifiers( const EmscriptenKeyboardEvent* e )
+{
+    ImGuiIO& io = ImGui::GetIO();
+    io.AddKeyEvent( ImGuiMod_Ctrl, e->ctrlKey );
+    io.AddKeyEvent( ImGuiMod_Shift, e->shiftKey );
+    io.AddKeyEvent( ImGuiMod_Alt, e->altKey );
+    io.AddKeyEvent( ImGuiMod_Super, e->metaKey );
+}
+
+// Convert a browser wheel delta to the unit the rest of the profiler expects: 1.0 is one
+// notch of a discrete mouse wheel, and high resolution wheels or touchpads produce
+// fractional values. The other backends already follow this convention (Wayland divides
+// the wl_fixed axis value by 15, GLFW reports notches directly), and the timeline scales
+// its zoom step by the delta, so an unnormalized value zooms by wildly the wrong amount.
+//
+// A WheelEvent may report its delta in one of three units and browsers disagree on which they
+// use: Chromium and WebKit report pixels, Gecko reports lines. The event carries no notch
+// count, so convert using the per-unit amount a single notch conventionally produces. These
+// are de-facto values rather than specified ones, and a browser scrolling a little too fast or
+// slow can be trimmed with the vertical scroll multiplier in the profiler options.
+static double WheelDeltaScale( unsigned int deltaMode )
+{
+    switch( deltaMode )
+    {
+    case DOM_DELTA_LINE:  return 1. / 3.;   // Gecko: 3 lines per notch
+    case DOM_DELTA_PAGE:  return 1.;        // 1 page per notch
+    case DOM_DELTA_PIXEL:
+    default:              return 1. / 100.; // Chromium: 100 px per notch
+    }
+}
+
 Backend::Backend( const char* title, const std::function<void()>& redraw, const std::function<void(float)>& scaleChanged, const std::function<int(void)>& isBusy, RunQueue* mainThreadTasks )
 {
     constexpr EGLint eglConfigAttrib[] = {
@@ -238,11 +269,13 @@ Backend::Backend( const char* title, const std::function<void()>& redraw, const 
         return EM_TRUE;
     } );
     emscripten_set_wheel_callback( "#canvas", nullptr, EM_TRUE, []( int, const EmscriptenWheelEvent* e, void* ) -> EM_BOOL {
-        ImGui::GetIO().AddMouseWheelEvent( e->deltaX * -0.05, e->deltaY * -0.05 );
+        const auto scale = WheelDeltaScale( e->deltaMode );
+        ImGui::GetIO().AddMouseWheelEvent( e->deltaX * -scale, e->deltaY * -scale );
         tracy::s_wasActive = true;
         return EM_TRUE;
     } );
     emscripten_set_keydown_callback( EMSCRIPTEN_EVENT_TARGET_WINDOW, nullptr, EM_TRUE, [] ( int, const EmscriptenKeyboardEvent* e, void* ) -> EM_BOOL {
+        UpdateKeyModifiers( e );
         const auto code = TranslateKeyCode( e->code );
         if( code == ImGuiKey_None ) return EM_FALSE;
         ImGui::GetIO().AddKeyEvent( code, true );
@@ -250,6 +283,7 @@ Backend::Backend( const char* title, const std::function<void()>& redraw, const 
         return EM_TRUE;
     } );
     emscripten_set_keyup_callback( EMSCRIPTEN_EVENT_TARGET_WINDOW, nullptr, EM_TRUE, [] ( int, const EmscriptenKeyboardEvent* e, void* ) -> EM_BOOL {
+        UpdateKeyModifiers( e );
         const auto code = TranslateKeyCode( e->code );
         if( code == ImGuiKey_None ) return EM_FALSE;
         ImGui::GetIO().AddKeyEvent( code, false );
@@ -376,4 +410,14 @@ void Backend::SetTitle( const char* title )
 float Backend::GetDpiScale()
 {
     return EM_ASM_DOUBLE( { return window.devicePixelRatio; } );
+}
+
+size_t Backend::HandleType()
+{
+    return 0;
+}
+
+void* Backend::Handle()
+{
+    return nullptr;
 }

@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "TracyAssert.hpp"
 #include "TracyTaggedUserlandAddress.hpp"
 #include "TracyForceInline.hpp"
 
@@ -74,6 +75,8 @@ enum class QueueType : uint8_t
     GpuTime,
     GpuContextName,
     GpuAnnotationName,
+    GpuMarkerMeta,
+    GpuMarker,
     CallstackFrameSize,
     SymbolInformation,
     ExternalNameMetadata,
@@ -81,11 +84,15 @@ enum class QueueType : uint8_t
     SourceCodeMetadata,
     FiberEnter,
     FiberLeave,
+    SectionEnter,
+    SectionLeave,
+    SectionSetup,
     Terminate,
     KeepAlive,
     ThreadContext,
     GpuCalibration,
     GpuTimeSync,
+    GpuZone,
     Crash,
     CrashReport,
     ZoneValidation,
@@ -122,6 +129,8 @@ enum class QueueType : uint8_t
     CpuTopology,
     SingleStringData,
     SecondStringData,
+    SingleStringData8,
+    SecondStringData8,
     MemNamePayload,
     ThreadGroupHint,
     GpuZoneAnnotation,
@@ -307,6 +316,36 @@ struct QueueFiberLeave
     uint32_t thread;
 };
 
+struct QueueSectionEnter
+{
+    int64_t time;
+    uint32_t id;
+    uint16_t category;
+};
+
+struct QueueSectionEnterFat : public QueueSectionEnter
+{
+    uint64_t text;      // ptr
+    uint16_t size;
+};
+
+struct QueueSectionLeave
+{
+    int64_t time;
+    uint32_t id;
+};
+
+struct QueueSectionSetup
+{
+    uint16_t category;
+};
+
+struct QueueSectionSetupFat : public QueueSectionSetup
+{
+    uint64_t text;      // ptr
+    uint16_t size;
+};
+
 struct QueueLockTerminate
 {
     uint32_t id;
@@ -390,7 +429,7 @@ enum class MessageSeverity : uint8_t
     Debug,   // Describes variable states and details about specific internal events in the software, that are useful for investigations.
     Info,    // Describes normal events, which inform on the expected progress and state of your software.
     Warning, // Describes potentially dangerous situations caused by unexpected events and states.
-    Error,   // Describes the occurance of unexpected behavior. Does not interrupt the execution of the software.
+    Error,   // Describes the occurrence of unexpected behavior. Does not interrupt the execution of the software.
     Fatal,   // Describes a critical event that will lead to a software failure/crash.
     COUNT
 };
@@ -404,13 +443,13 @@ tracy_force_inline uint8_t MakeMessageMetadata(MessageSourceType source, Message
 
 tracy_force_inline MessageSourceType MessageSourceFromMetadata(uint8_t metadata)
 {
-    assert( ( metadata & 0x0F ) < (uint8_t)MessageSourceType::COUNT );
+    TRACY_ASSERT( ( metadata & 0x0F ) < (uint8_t)MessageSourceType::COUNT );
     return (MessageSourceType)( metadata & 0x0F );
 }
 
 tracy_force_inline MessageSeverity MessageSeverityFromMetadata(uint8_t metadata)
 {
-    assert( ( ( metadata & 0xF0 ) >> 4 ) < (uint8_t)MessageSeverity::COUNT );
+    TRACY_ASSERT( ( ( metadata & 0xF0 ) >> 4 ) < (uint8_t)MessageSeverity::COUNT );
     return (MessageSeverity)( ( metadata & 0xF0 ) >> 4 );
 }
 
@@ -493,6 +532,7 @@ enum class GpuContextType : uint8_t
     Custom,
     CUDA,
     Rocprof,
+    WebGPU,
     tt_device
 };
 
@@ -500,6 +540,8 @@ enum GpuContextFlags : uint8_t
 {
     GpuContextCalibration   = 1 << 0
 };
+
+constexpr int32_t InvalidGpuContextId = -1;
 
 struct QueueGpuNewContext
 {
@@ -540,6 +582,41 @@ struct QueueGpuZoneAnnotation
     uint32_t thread;
     uint16_t queryId;
     uint8_t context;
+};
+
+// A point-in-time event on a GPU/device lane, as opposed to a zone which has a duration. The
+// source location holds the event's identity (name, file, line, color) and is interned by the
+// server, so it must not carry per-event values; those go in the metadata string, which arrives
+// in the QueueGpuMarkerMeta item immediately preceding this one (omitted when there is none).
+struct QueueGpuMarker
+{
+    int64_t gpuTime;
+    uint64_t srcloc;
+    uint32_t thread;
+    uint16_t context;
+    uint8_t markerType;
+};
+
+// Only carries the string; the item exists because a QueueItem is 32 bytes and QueueGpuMarker
+// plus the fat pointer and size does not fit.
+struct QueueGpuMarkerMeta
+{
+    uint16_t context;
+};
+
+struct QueueGpuZone
+{
+    int64_t gpuStart;
+    int64_t gpuEnd;
+    uint64_t srcloc;
+    uint32_t thread;
+    uint16_t context;
+};
+
+struct QueueGpuMarkerMetaFat : public QueueGpuMarkerMeta
+{
+    uint64_t ptr;
+    uint16_t size;
 };
 
 struct QueueGpuTime
@@ -773,7 +850,7 @@ struct QueueParamSetup
 {
     uint32_t idx;
     uint64_t name;      // ptr
-    uint8_t isBool;
+    uint8_t type;
     int32_t val;
 };
 
@@ -919,7 +996,16 @@ struct QueueItem
         QueueSourceCodeNotAvailable sourceCodeNotAvailable;
         QueueFiberEnter fiberEnter;
         QueueFiberLeave fiberLeave;
+        QueueSectionEnter sectionEnter;
+        QueueSectionEnterFat sectionEnterFat;
+        QueueSectionLeave sectionLeave;
+        QueueSectionSetup sectionSetup;
+        QueueSectionSetupFat sectionSetupFat;
         QueueGpuZoneAnnotation zoneAnnotation;
+        QueueGpuMarker gpuMarker;
+        QueueGpuMarkerMeta gpuMarkerMeta;
+        QueueGpuMarkerMetaFat gpuMarkerMetaFat;
+        QueueGpuZone gpuZone;
     };
 };
 #pragma pack( pop )
@@ -991,6 +1077,8 @@ static constexpr size_t QueueDataSize[] = {
     sizeof( QueueHeader ) + sizeof( QueueGpuTime ),
     sizeof( QueueHeader ) + sizeof( QueueGpuContextName ),
     sizeof( QueueHeader ) + sizeof( QueueGpuAnnotationName ),
+    sizeof( QueueHeader ) + sizeof( QueueGpuMarkerMeta ),   // GPU marker metadata (fat: carries the string)
+    sizeof( QueueHeader ) + sizeof( QueueGpuMarker ),       // GPU marker (fat: carries the srcloc payload)
     sizeof( QueueHeader ) + sizeof( QueueCallstackFrameSize ),
     sizeof( QueueHeader ) + sizeof( QueueSymbolInformation ),
     sizeof( QueueHeader ),                                  // ExternalNameMetadata - not for wire transfer
@@ -998,12 +1086,16 @@ static constexpr size_t QueueDataSize[] = {
     sizeof( QueueHeader ),                                  // SourceCodeMetadata - not for wire transfer
     sizeof( QueueHeader ) + sizeof( QueueFiberEnter ),
     sizeof( QueueHeader ) + sizeof( QueueFiberLeave ),
+    sizeof( QueueHeader ) + sizeof( QueueSectionEnter ),
+    sizeof( QueueHeader ) + sizeof( QueueSectionLeave ),
+    sizeof( QueueHeader ) + sizeof( QueueSectionSetup ),
     // above items must be first
     sizeof( QueueHeader ),                                  // terminate
     sizeof( QueueHeader ),                                  // keep alive
     sizeof( QueueHeader ) + sizeof( QueueThreadContext ),
     sizeof( QueueHeader ) + sizeof( QueueGpuCalibration ),
     sizeof( QueueHeader ) + sizeof( QueueGpuTimeSync ),
+    sizeof( QueueHeader ) + sizeof( QueueGpuZone ),
     sizeof( QueueHeader ),                                  // crash
     sizeof( QueueHeader ) + sizeof( QueueCrashReport ),
     sizeof( QueueHeader ) + sizeof( QueueZoneValidation ),
@@ -1040,6 +1132,8 @@ static constexpr size_t QueueDataSize[] = {
     sizeof( QueueHeader ) + sizeof( QueueCpuTopology ),
     sizeof( QueueHeader ),                                  // single string data
     sizeof( QueueHeader ),                                  // second string data
+    sizeof( QueueHeader ),                                  // single string data, 8 bit length
+    sizeof( QueueHeader ),                                  // second string data, 8 bit length
     sizeof( QueueHeader ) + sizeof( QueueMemNamePayload ),
     sizeof( QueueHeader ) + sizeof( QueueThreadGroupHint ),
     sizeof( QueueHeader ) + sizeof( QueueGpuZoneAnnotation ), // GPU zone annotation

@@ -51,6 +51,10 @@
 
 #include "TracySystem.hpp"
 
+#ifdef TRACY_PLATFORM_HEADER
+#  include TRACY_PLATFORM_HEADER
+#endif
+
 #if defined _WIN32
 extern "C" typedef HRESULT (WINAPI *t_SetThreadDescription)( HANDLE, PCWSTR );
 extern "C" typedef HRESULT (WINAPI *t_GetThreadDescription)( HANDLE, PWSTR* );
@@ -69,7 +73,9 @@ namespace detail
 
 TRACY_API uint32_t GetThreadHandleImpl()
 {
-#if defined _WIN32
+#if defined TRACY_HAS_CUSTOM_THREAD_ID
+    return PlatformGetThreadId();
+#elif defined _WIN32
     static_assert( sizeof( decltype( GetCurrentThreadId() ) ) <= sizeof( uint32_t ), "Thread handle too big to fit in protocol" );
     return uint32_t( GetCurrentThreadId() );
 #elif defined __APPLE__
@@ -133,6 +139,22 @@ void ThreadNameMsvcMagic( const THREADNAME_INFO& info )
     __except(EXCEPTION_EXECUTE_HANDLER)
     {
     }
+}
+#endif
+
+#ifdef TRACY_ENABLE
+static void AddThreadNameData( uint32_t id, const char* name, int32_t groupHint )
+{
+    const auto sz = strlen( name );
+    char* buf = (char*)tracy_malloc( sz+1 );
+    memcpy( buf, name, sz );
+    buf[sz] = '\0';
+    auto data = (ThreadNameData*)tracy_malloc_fast( sizeof( ThreadNameData ) );
+    data->id = id;
+    data->groupHint = groupHint;
+    data->name = buf;
+    data->next = GetThreadNameData().load( std::memory_order_relaxed );
+    while( !GetThreadNameData().compare_exchange_weak( data->next, data, std::memory_order_release, std::memory_order_relaxed ) ) {}
 }
 #endif
 
@@ -202,18 +224,14 @@ TRACY_API void SetThreadNameWithHint( const char* name, int32_t groupHint )
     };
 #endif
 #ifdef TRACY_ENABLE
-    {
-        const auto sz = strlen( name );
-        char* buf = (char*)tracy_malloc( sz+1 );
-        memcpy( buf, name, sz );
-        buf[sz] = '\0';
-        auto data = (ThreadNameData*)tracy_malloc_fast( sizeof( ThreadNameData ) );
-        data->id = detail::GetThreadHandleImpl();
-        data->groupHint = groupHint;
-        data->name = buf;
-        data->next = GetThreadNameData().load( std::memory_order_relaxed );
-        while( !GetThreadNameData().compare_exchange_weak( data->next, data, std::memory_order_release, std::memory_order_relaxed ) ) {}
-    }
+    AddThreadNameData( detail::GetThreadHandleImpl(), name, groupHint );
+#endif
+}
+
+TRACY_API void SetThreadName( uint32_t id, const char* name )
+{
+#ifdef TRACY_ENABLE
+    AddThreadNameData( id, name, 0 );
 #endif
 }
 
@@ -341,7 +359,9 @@ TRACY_API const char* GetEnvVar( const char* name )
 
 TRACY_API const char* GetUserLogin()
 {
-#if defined _WIN32
+#if defined TRACY_HAS_CUSTOM_USER_INFO
+    return PlatformGetUserLogin();
+#elif defined _WIN32
 #  if defined TRACY_WIN32_NO_DESKTOP
     return "(?)";
 #  else
@@ -363,10 +383,14 @@ TRACY_API const char* GetUserLogin()
 
 TRACY_API const char* GetUserFullName()
 {
-#if defined _WIN32
+#if defined TRACY_HAS_CUSTOM_USER_INFO
+    return PlatformGetUserFullName();
+#elif defined _WIN32
+#  if !defined TRACY_WIN32_NO_DESKTOP
     static char buf[1024];
     ULONG size = sizeof( buf );
     if( GetUserNameExA( NameDisplay, buf, &size ) ) return buf;
+#  endif
     return nullptr;
 #elif defined __ANDROID__
     const auto passwd = getpwuid( getuid() );

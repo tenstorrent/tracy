@@ -11,6 +11,11 @@
 namespace tracy
 {
 
+// Off-screen items measured per frame when they defer measurement. A GPU context is five lanes at ~50 us each on a
+// worker, so 64 contexts is ~16 ms of worker time per frame spread over the pool, and a 1000-context trace is
+// current again ~17 frames after a view change.
+constexpr int LazyMeasureBudget = 64;
+
 TimelineController::TimelineController( View& view, Worker& worker, bool threading )
     : m_height( 0 )
     , m_scroll( 0 )
@@ -107,7 +112,7 @@ void TimelineController::End( double pxns, const ImVec2& wpos, bool hover, bool 
         const auto mouseMoved = mouseDelta.x != 0.0f || mouseDelta.y != 0.0f;
         const auto& mousePos = ImGui::GetIO().MousePos;
         const auto mouseVisible = ImGui::IsMousePosValid( &mousePos );
-        return ( ( imguiChangedScroll || mouseMoved || !mouseVisible ) && !ImGui::IsMouseDown( 1 ) ) || !m_centerItemkey;
+        return ( ( imguiChangedScroll || mouseMoved || !mouseVisible ) && !ImGui::IsMouseDown( ImGuiMouseButton_Right ) ) || !m_centerItemkey;
     };
 
     if( !vcenter )
@@ -139,16 +144,32 @@ void TimelineController::End( double pxns, const ImVec2& wpos, bool hover, bool 
     ctx.hover = hover;
 
     int yOffset = 0;
-    for( auto& item : m_items )
+    int lazyBudget = LazyMeasureBudget;
+    size_t lazyNext = 0;
+    for( size_t i = 0; i < m_items.size(); i++ )
     {
+        auto item = m_items[i];
         if( item->WantPreprocess() && item->IsVisible() )
         {
             const auto yPos = wpos.y + yOffset;
             const bool visible = m_firstFrame || ( yPos < yMax && yPos + item->GetHeight() >= yMin );
-            item->Preprocess( ctx, m_td, visible, yPos );
+            if( visible || !item->MeasureOffscreenLazily() )
+            {
+                item->Preprocess( ctx, m_td, visible, yPos );
+            }
+            // Stale off-screen items are brought current a budget per frame, resuming below where the previous
+            // frame stopped: under sustained change (a live capture, a continuous pan) every item still gets its
+            // turn, where always starting from the top would re-measure the same first items and starve the rest.
+            else if( lazyBudget > 0 && i >= m_lazyCursor && !item->MeasureIsCurrent( ctx ) )
+            {
+                item->Preprocess( ctx, m_td, false, yPos );
+                lazyBudget--;
+                lazyNext = i + 1;
+            }
         }
         yOffset += m_firstFrame ? 0 : item->GetHeight();
     }
+    m_lazyCursor = lazyBudget > 0 ? 0 : lazyNext;
     m_td.Sync();
 
     yOffset = 0;

@@ -6,20 +6,79 @@
 namespace tracy
 {
 
-void View::SetPlaybackFrame( uint32_t idx )
+int View::GetPlaybackFrameBegin() const
+{
+    return m_playback.limitRange ? m_playback.range.first : 0;
+}
+
+int View::GetPlaybackFrameEnd() const
+{
+    return m_playback.limitRange ? m_playback.range.second + 1 : m_worker.GetFrameImageCount();
+}
+
+std::pair<int, int> View::GetPlaybackFrameRangeFromTime( int64_t tmin, int64_t tmax, bool requireCoverage ) const
+{
+    const auto& frameImages = m_worker.GetFrameImages();
+    const int count = (int)frameImages.size();
+    if( count == 0 ) return { -1, -1 };
+
+    const auto& frameSet = *m_worker.GetFramesBase();
+    const auto cmp = [this, &frameSet]( int64_t t, const auto& fi ) { return t < m_worker.GetFrameBegin( frameSet, fi->frameRef ); };
+
+    auto it = std::upper_bound( frameImages.begin(), frameImages.end(), tmax, cmp );
+    auto hi = (int)std::distance( frameImages.begin(), it ) - 1;
+    if( hi < 0 ) return { 0, 0 };
+
+    it = std::upper_bound( frameImages.begin(), it, tmin, cmp );
+    auto lo = std::max<int>( 0, (int)std::distance( frameImages.begin(), it ) - 1 );
+
+    if( requireCoverage )
+    {
+        const auto lo0 = m_worker.GetFrameBegin( frameSet, frameImages[lo]->frameRef );
+        if( lo0 < tmin )
+        {
+            const auto lo1 = m_worker.GetFrameEnd( frameSet, frameImages[lo]->frameRef );
+            const auto span = lo1 - lo0;
+            const auto overlap = std::min( lo1, tmax ) - tmin;
+            if( overlap * 4 < span * 3 ) lo++;
+        }
+        const auto hi1 = m_worker.GetFrameEnd( frameSet, frameImages[hi]->frameRef );
+        if( hi1 > tmax )
+        {
+            const auto hi0 = m_worker.GetFrameBegin( frameSet, frameImages[hi]->frameRef );
+            const auto span = hi1 - hi0;
+            const auto overlap = tmax - std::max( hi0, tmin );
+            if( overlap * 4 < span * 3 ) hi--;
+        }
+        if( lo > hi ) return { 0, 0 };
+    }
+
+    return { lo, hi };
+}
+
+void View::SetPlaybackFrame( uint32_t idx, bool mayExtend )
 {
     const auto frameSet = m_worker.GetFramesBase();
     const auto& frameImages = m_worker.GetFrameImages();
-    assert( idx < frameImages.size() );
+    auto begin = GetPlaybackFrameBegin();
+    auto end = GetPlaybackFrameEnd();
+    if( mayExtend && ( idx < begin || idx >= end ) )
+    {
+        m_playback.limitRange = false;
+        begin = GetPlaybackFrameBegin();
+        end = GetPlaybackFrameEnd();
+    }
+    assert( idx >= begin && idx < end );
 
     m_playback.frame = idx;
 
-    if( idx == frameImages.size() - 1 )
+    if( end - begin <= 1 || ( idx == end - 1 && !m_playback.loop ) )
     {
         m_playback.pause = true;
     }
     else
     {
+        if( idx == end - 1 ) idx--;
         const auto t0 = m_worker.GetFrameBegin( *frameSet, frameImages[idx]->frameRef );
         const auto t1 = m_worker.GetFrameBegin( *frameSet, frameImages[idx+1]->frameRef );
         m_playback.timeLeft = ( t1 - t0 ) / 1000000000.f;
@@ -43,7 +102,8 @@ void View::DrawPlayback()
     const auto frameSet = m_worker.GetFramesBase();
     const auto& frameImages = m_worker.GetFrameImages();
     const auto& fi = frameImages[m_playback.frame];
-    const auto ficnt = m_worker.GetFrameImageCount();
+    const auto begin = GetPlaybackFrameBegin();
+    const auto end = GetPlaybackFrameEnd();
 
     const auto tstart = m_worker.GetFrameBegin( *frameSet, fi->frameRef );
 
@@ -79,7 +139,15 @@ void View::DrawPlayback()
             m_playback.timeLeft -= dt;
             if( m_playback.timeLeft == 0 )
             {
-                SetPlaybackFrame( m_playback.frame + 1 );
+                if( m_playback.frame + 1 == end )
+                {
+                    assert( m_playback.loop );
+                    SetPlaybackFrame( begin, false );
+                }
+                else
+                {
+                    SetPlaybackFrame( m_playback.frame + 1, false );
+                }
             }
         }
     }
@@ -114,7 +182,7 @@ void View::DrawPlayback()
         tmp -= (int)wheel;
         changed = true;
     }
-    changed |= ImGui::SliderInt( "Frame image", &tmp, 1, ficnt, "%d" );
+    changed |= ImGui::SliderInt( "Frame image", &tmp, begin + 1, end, "%d" );
     ImGui::SetItemKeyOwner( ImGuiKey_MouseWheelY );
     if( wheel && ImGui::IsItemHovered() )
     {
@@ -130,12 +198,14 @@ void View::DrawPlayback()
     }
     if( changed )
     {
-        if( tmp < 1 ) tmp = 1;
-        else if( (uint32_t)tmp > ficnt ) tmp = ficnt;
-        SetPlaybackFrame( uint32_t( tmp - 1 ) );
+        if( (uint32_t)tmp < begin + 1 ) tmp = begin + 1;
+        else if( (uint32_t)tmp > end ) tmp = end;
+        SetPlaybackFrame( uint32_t( tmp - 1 ), false );
         m_playback.pause = true;
     }
     ImGui::SliderFloat( "Playback speed", &m_playback.speed, 0.1f, 4, "%.2f" );
+    ImGui::SameLine();
+    if( ImGui::SmallButton( "Reset##speed" ) ) m_playback.speed = 1;
 
     const auto th = ImGui::GetTextLineHeight();
     float bw = 0;
@@ -147,28 +217,28 @@ void View::DrawPlayback()
 
     if( ImGui::Button( " " ICON_FA_CARET_LEFT " " ) )
     {
-        if( m_playback.frame > 0 )
+        if( m_playback.frame > begin )
         {
-            SetPlaybackFrame( m_playback.frame - 1 );
+            SetPlaybackFrame( m_playback.frame - 1, false );
             m_playback.pause = true;
         }
     }
     ImGui::SameLine();
     if( ImGui::Button( " " ICON_FA_CARET_RIGHT " " ) )
     {
-        if( m_playback.frame < ficnt - 1 )
+        if( m_playback.frame < end - 1 )
         {
-            SetPlaybackFrame( m_playback.frame + 1 );
+            SetPlaybackFrame( m_playback.frame + 1, false );
             m_playback.pause = true;
         }
     }
     ImGui::SameLine();
     if( m_playback.pause )
     {
-        if( ImGui::Button( PlaybackWindowButtons[0], ImVec2( bw, 0 ) ) && m_playback.frame != frameImages.size() - 1 )
-        {
-            m_playback.pause = false;
-        }
+        const auto disabled = !m_playback.loop && ( m_playback.frame == end - 1 );
+        if( disabled ) ImGui::BeginDisabled();
+        if( ImGui::Button( PlaybackWindowButtons[0], ImVec2( bw, 0 ) ) ) m_playback.pause = false;
+        if( disabled ) ImGui::EndDisabled();
     }
     else
     {
@@ -191,6 +261,89 @@ void View::DrawPlayback()
     }
     ImGui::SameLine();
     ImGui::Checkbox( "Zoom 2\xc3\x97", &m_playback.zoom );
+    ImGui::SameLine();
+    ImGui::Checkbox( "Loop", &m_playback.loop );
+    bool limitChanged = SmallCheckbox( "Limit frame range", &m_playback.limitRange );
+    if( m_playback.limitRange )
+    {
+        if( m_playback.range.first < 0 ) m_playback.range = { 0, m_worker.GetFrameImageCount() - 1 };
+
+        ImGui::SameLine();
+        if( ImGui::SmallButton( ICON_FA_COPY " Copy from…" ) ) ImGui::OpenPopup( "playbackCopyFrom" );
+        ImGui::SameLine();
+        if( ImGui::SmallButton( "Reset##range" ) ) m_playback.range = { 0, m_worker.GetFrameImageCount() - 1 };
+        if( ImGui::BeginPopup( "playbackCopyFrom" ) )
+        {
+            if( m_annotations.empty() )
+            {
+                TextDisabledUnformatted( ICON_FA_NOTE_STICKY " Annotation" );
+            }
+            else if( ImGui::BeginMenu( ICON_FA_NOTE_STICKY " Annotation" ) )
+            {
+                for( auto& v : m_annotations )
+                {
+                    SmallColorBox( v->color );
+                    ImGui::SameLine();
+                    if( ImGui::MenuItem( v->text.empty() ? "<unnamed>" : v->text.c_str() ) )
+                    {
+                        m_playback.range = GetPlaybackFrameRangeFromTime( v->range.min, v->range.max, m_playback.requireCoverage );
+                        limitChanged = true;
+                    }
+                    ImGui::SameLine();
+                    ImGui::TextDisabled( "%s - %s (%s)", TimeToStringExact( v->range.min ), TimeToStringExact( v->range.max ), TimeToString( v->range.max - v->range.min ) );
+                }
+                ImGui::EndMenu();
+            }
+
+            const auto sel = ListSectionsMenu( m_worker );
+            if( sel.active )
+            {
+                m_playback.range = GetPlaybackFrameRangeFromTime( sel.min, sel.max, m_playback.requireCoverage );
+                limitChanged = true;
+            }
+
+            for( auto& r : m_ranges )
+            {
+                if( r.range->min == 0 && r.range->max == 0 )
+                {
+                    TextDisabledUnformatted( r.name );
+                }
+                else if( ImGui::MenuItem( r.name ) )
+                {
+                    m_playback.range = GetPlaybackFrameRangeFromTime( r.range->min, r.range->max, m_playback.requireCoverage );
+                    limitChanged = true;
+                }
+            }
+            ImGui::Separator();
+            SmallCheckbox( "Require frame coverage", &m_playback.requireCoverage );
+            ImGui::EndPopup();
+        }
+
+        ImGui::Indent();
+        int r0 = m_playback.range.first + 1;
+        int r1 = m_playback.range.second + 1;
+        if( ImGui::DragIntRange2( "##range", &r0, &r1, 1, 1, m_worker.GetFrameImageCount(), "%d" ) )
+        {
+            m_playback.range = { r0 - 1, r1 - 1 };
+            limitChanged = true;
+        }
+        ImGui::Unindent();
+
+        if( limitChanged )
+        {
+            if( m_playback.frame < m_playback.range.first )
+            {
+                m_playback.pause = true;
+                SetPlaybackFrame( m_playback.range.first, false );
+            }
+            else if( m_playback.frame > m_playback.range.second )
+            {
+                m_playback.pause = true;
+                SetPlaybackFrame( m_playback.range.second, false );
+            }
+        }
+    }
+    ImGui::Separator();
     TextFocused( "Timestamp:", TimeToString( tstart ) );
     TooltipIfHovered( TimeToStringExact( tstart ) );
     ImGui::SameLine();

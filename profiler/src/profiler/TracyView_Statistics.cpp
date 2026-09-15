@@ -39,12 +39,9 @@ void View::DrawStatistics()
 {
     const auto scale = GetScale();
     ImGui::SetNextWindowSize( ImVec2( 1400 * scale, 600 * scale ), ImGuiCond_FirstUseEver );
+    m_statisticsConstraint.Constrain();
     ImGui::Begin( "Statistics", &m_showStatistics, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse );
     if( ImGui::GetCurrentWindowRead()->SkipItems ) { ImGui::End(); return; }
-#ifdef TRACY_NO_STATISTICS
-    ImGui::TextWrapped( "Collection of statistical data is disabled in this build." );
-    ImGui::TextWrapped( "Rebuild without the TRACY_NO_STATISTICS macro to enable statistics view." );
-#else
     if( !m_worker.AreSourceLocationZonesReady() && ( !m_worker.AreCallstackSamplesReady() || m_worker.GetCallstackSampleCount() == 0 ) )
     {
         const auto ty = ImGui::GetTextLineHeight();
@@ -248,6 +245,7 @@ void View::DrawStatistics()
                         total = it->second.nonReentrantTotal;
                         break;
                     }
+                    if( count == 0 ) continue;
                     if( !filterActive )
                     {
                         srcloc.push_back_no_space_check( SrcLocZonesSlim { it->first, (uint16_t)it->second.threadCnt.size(), count, total } );
@@ -276,6 +274,7 @@ void View::DrawStatistics()
         ImGui::Spacing();
         ImGui::SameLine();
         AccumulationModeComboBox();
+        m_statisticsConstraint.MarkMinWidth();
     }
     else if( m_statMode == 1 )
     {
@@ -318,6 +317,7 @@ void View::DrawStatistics()
         const char* locationTable = "Entry\0Sample\0Smart\0";
         ImGui::SetNextItemWidth( ImGui::CalcTextSize( "Sample" ).x + ImGui::GetTextLineHeight() * 2 );
         ImGui::Combo( "##location", &m_statSampleLocation, locationTable );
+        m_statisticsConstraint.MarkMinWidth();
     }
     else
     {
@@ -334,10 +334,48 @@ void View::DrawStatistics()
         }
 
         const auto filterActive = m_statisticsFilter.IsActive();
+        const auto gpuCtxLimit = m_gpuCtxLimit && !m_worker.GetGpuData().empty();
         auto& slz = m_worker.GetGpuSourceLocationZones();
         srcloc.reserve( slz.size() );
         uint32_t slzcnt = 0;
-        if( m_statRange.active )
+        if( gpuCtxLimit )
+        {
+            // A zone's owning context cannot be derived from the zone list itself, so counts
+            // and totals come from a per-context index built by walking the contexts' timelines.
+            BuildGpuZoneIndex( false, 0, true, m_statRange );
+
+            const auto& gpuData = m_worker.GetGpuData();
+            m_gpuCtxVisible.resize( gpuData.size() );
+            for( size_t i=0; i<gpuData.size(); i++ ) m_gpuCtxVisible[i] = IsGpuCtxVisible( gpuData[i] );
+
+            unordered_flat_map<int16_t, std::pair<uint64_t, int64_t>> acc;
+            for( size_t ci=0; ci<m_gpuZoneIdx.ctxStats.size(); ci++ )
+            {
+                if( !m_gpuCtxVisible[ci] ) continue;
+                for( const auto& v : m_gpuZoneIdx.ctxStats[ci] )
+                {
+                    auto& e = acc[v.first];
+                    e.first += v.second.first;
+                    e.second += v.second.second;
+                }
+            }
+
+            for( auto it = slz.begin(); it != slz.end(); ++it )
+            {
+                if( it->second.total == 0 ) continue;
+                auto ait = acc.find( it->first );
+                if( ait == acc.end() || ait->second.first == 0 ) continue;
+                slzcnt++;
+                if( filterActive )
+                {
+                    auto& sl = m_worker.GetSourceLocation( it->first );
+                    auto name = m_worker.GetString( sl.name.active ? sl.name : sl.function );
+                    if( !m_statisticsFilter.PassFilter( name ) ) continue;
+                }
+                srcloc.push_back_no_space_check( SrcLocZonesSlim { it->first, 0, size_t( ait->second.first ), ait->second.second } );
+            }
+        }
+        else if( m_statRange.active )
         {
             const auto min = m_statRange.min;
             const auto max = m_statRange.max;
@@ -456,6 +494,15 @@ void View::DrawStatistics()
         TextFocused( "Visible zones:", RealToString( srcloc.size() ) );
         ImGui::SameLine();
         copySrclocsToClipboard = ClipboardButton();
+        if( !m_worker.GetGpuData().empty() )
+        {
+            ImGui::SameLine();
+            ImGui::Spacing();
+            ImGui::SameLine();
+            ImGui::Checkbox( ICON_FA_EYE " Only visible GPU contexts", &m_gpuCtxLimit );
+            ImGui::SameLine();
+            DrawHelpMarker( "Restrict the statistics to the GPU contexts that are enabled in Options \xe2\x86\x92 GPU zones. The same setting is shared with the GPU zone search." );
+        }
     }
 
     ImGui::Separator();
@@ -583,6 +630,7 @@ void View::DrawStatistics()
         ImGui::SameLine();
         ImGui::Checkbox( ICON_FA_FIRE " Top inline", &m_topInline );
         if( m_statSeparateInlines ) ImGui::EndDisabled();
+        m_statisticsConstraint.MarkMinWidth();
     }
 
     ImGui::Separator();
@@ -722,9 +770,16 @@ void View::DrawStatistics()
                     ImGui::SameLine();
                     if( m_statMode == 0 )
                     {
-                        if( ImGui::Selectable( name, m_findZone.show && !m_findZone.match.empty() && m_findZone.match[m_findZone.selMatch] == v.srcloc, ImGuiSelectableFlags_SpanAllColumns ) )
+                        if( ImGui::Selectable( name, m_findZone.show && m_findZoneMode == 0 && !m_findZone.match.empty() && m_findZone.match[m_findZone.selMatch] == v.srcloc, ImGuiSelectableFlags_SpanAllColumns ) )
                         {
                             m_findZone.ShowZone( v.srcloc, name );
+                        }
+                    }
+                    else if( m_statMode == 2 )
+                    {
+                        if( ImGui::Selectable( name, m_findZone.show && m_findZoneMode == 1 && !m_findZoneGpu.match.empty() && m_findZoneGpu.match[m_findZoneGpu.selMatch] == v.srcloc, ImGuiSelectableFlags_SpanAllColumns ) )
+                        {
+                            ShowFindZoneGpu( v.srcloc, name );
                         }
                     }
                     else
@@ -744,7 +799,7 @@ void View::DrawStatistics()
                     TextDisabledUnformatted( LocationToString( file, srcloc.line ) );
                     if( ImGui::IsItemHovered() )
                     {
-                        DrawSourceTooltip( file, srcloc.line );
+                        DrawSourceTooltip( file, srcloc.line, srcloc.line );
                         if( ImGui::IsItemClicked( 1 ) )
                         {
                             if( SourceFileValid( file, m_worker.GetCaptureTime(), *this, m_worker ) )
@@ -1000,9 +1055,34 @@ void View::DrawStatistics()
             }
         }
 
-        DrawSamplesStatistics( data, timeRange, m_statAccumulationMode );
+        // The denominator is the number of collected samples, excluding context
+        // switch samples, which do not participate in the sampling statistics. This
+        // way the percentages have the same meaning with and without an active
+        // range filter.
+        uint64_t totalSamples;
+        if( m_statRange.active )
+        {
+            static const auto CountInRange = []( const auto& vec, int64_t min, int64_t max ) -> uint64_t {
+                auto it = std::lower_bound( vec.begin(), vec.end(), min, []( const auto& lhs, const auto& rhs ) { return lhs.time.Val() < rhs; } );
+                auto end = std::lower_bound( it, vec.end(), max, []( const auto& lhs, const auto& rhs ) { return lhs.time.Val() < rhs; } );
+                return end - it;
+            };
+            totalSamples = 0;
+            for( auto& td : m_worker.GetThreadData() )
+            {
+                const auto cnt = CountInRange( td->samples, m_statRange.min, m_statRange.max );
+                const auto ctx = CountInRange( td->ctxSwitchSamples, m_statRange.min, m_statRange.max );
+                if( cnt > ctx ) totalSamples += cnt - ctx;
+            }
+        }
+        else
+        {
+            const auto cnt = m_worker.GetCallstackSampleCount();
+            const auto ctx = m_worker.GetContextSwitchSampleCount();
+            totalSamples = cnt > ctx ? cnt - ctx : 0;
+        }
+        DrawSamplesStatistics( data, timeRange, totalSamples, m_statAccumulationMode );
     }
-#endif
     ImGui::End();
 }
 

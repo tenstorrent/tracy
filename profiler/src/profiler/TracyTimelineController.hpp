@@ -51,6 +51,7 @@ private:
 
     std::vector<TimelineItem*> m_items;
     unordered_flat_map<const void*, std::unique_ptr<TimelineItem>> m_itemMap;
+    size_t m_lazyCursor = 0;
 
     float m_height;
     float m_scroll;

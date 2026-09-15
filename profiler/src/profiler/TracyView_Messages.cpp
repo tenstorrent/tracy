@@ -13,6 +13,7 @@ void View::DrawMessages()
 
     const auto scale = GetScale();
     ImGui::SetNextWindowSize( ImVec2( 1200 * scale, 600 * scale ), ImGuiCond_FirstUseEver );
+    m_messagesConstraint.Constrain();
     ImGui::Begin( "Messages", &m_showMessages );
     if( ImGui::GetCurrentWindowRead()->SkipItems ) { ImGui::End(); return; }
 
@@ -136,6 +137,9 @@ void View::DrawMessages()
         ImGui::SameLine();
         ImGui::Checkbox( ICON_FA_IMAGE " Show frame images", &m_showMessageImages );
     }
+
+    m_messagesConstraint.MarkMinWidth();
+    UpdateThreadOrder();
 
     bool threadsChanged = false;
     ImGui::AlignTextToFramePadding();
@@ -368,7 +372,6 @@ void View::DrawMessageLine( const MessageData& msg, bool hasCallstack, int& idx 
         m_msgToFocus.Decay( nullptr );
         m_messagesScrollBottom = false;
     }
-    ImGui::PopID();
     ImGui::TableNextColumn();
     SmallColorBox( GetThreadColor( tid, 0 ) );
     ImGui::SameLine();
@@ -397,6 +400,16 @@ void View::DrawMessageLine( const MessageData& msg, bool hasCallstack, int& idx 
         ImGui::EndTooltip();
     }
     ImGui::PopStyleColor();
+    if( ImGui::IsItemClicked( ImGuiMouseButton_Right ) ) ImGui::OpenPopup( "MessageContext" );
+    if( ImGui::BeginPopup( "MessageContext" ) )
+    {
+        if( ImGui::Selectable( ICON_FA_CLIPBOARD " Copy message" ) )
+        {
+            ImGui::SetClipboardText( text );
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
     if( hasCallstack )
     {
         ImGui::TableNextColumn();
@@ -408,6 +421,7 @@ void View::DrawMessageLine( const MessageData& msg, bool hasCallstack, int& idx 
             DrawCallstackCalls( cs, 6 );
         }
     }
+    ImGui::PopID();
 }
 
 }

@@ -83,22 +83,22 @@ void TimelineItem::Draw( bool firstFrame, const TimelineContext& ctx, int yOffse
         }
         const auto label = HeaderLabel();
         labelWidth = ImGui::CalcTextSize( label ).x;
-        DrawTextContrast( draw, wpos + ImVec2( ty, hdrOffset ), m_showFull ? color : colorInactive, label );
         if( m_showFull )
         {
             DrawLine( draw, dpos + ImVec2( 0, hdrOffset + ty - 1 ), dpos + ImVec2( w, hdrOffset + ty - 1 ), HeaderLineColor() );
             HeaderExtraContents( ctx, hdrOffset, labelWidth );
         }
+        DrawTextContrast( draw, wpos + ImVec2( ty, hdrOffset ), m_showFull ? color : colorInactive, label );
 
         if( ctx.hover && ImGui::IsMouseHoveringRect( wpos + ImVec2( 0, hdrOffset ), wpos + ImVec2( ty + labelWidth, hdrOffset + ty ) ) )
         {
             HeaderTooltip( label );
 
-            if( IsMouseClicked( 0 ) )
+            if( IsMouseClicked( ImGuiMouseButton_Left ) )
             {
                 m_showFull = !m_showFull;
             }
-            if( IsMouseClicked( 2 ) )
+            if( IsMouseClicked( ImGuiMouseButton_Middle ) )
             {
                 const auto t0 = RangeBegin();
                 const auto t1 = RangeEnd();
@@ -107,7 +107,7 @@ void TimelineItem::Draw( bool firstFrame, const TimelineContext& ctx, int yOffse
                     m_view.ZoomToRange( t0, t1 );
                 }
             }
-            if( IsMouseClicked( 1 ) )
+            if( IsMouseClicked( ImGuiMouseButton_Right ) )
             {
                 ImGui::OpenPopup( "menuPopup" );
             }
@@ -162,7 +162,15 @@ void TimelineItem::AdjustThreadHeight( bool firstFrame, int yBegin, int yEnd )
 
 void TimelineItem::VisibilityCheckbox()
 {
+    // HeaderLabel() is a display string, not an identity: a named GPU context (TracyGpuContextName)
+    // may repeat, e.g. a client that opens/closes several profiling sessions in one run creates a
+    // fresh context per session with the same name. ImGui derives the checkbox id from the label, so
+    // duplicate labels collide on one ImGuiID and only the first item submitted in the frame can be
+    // toggled -- every later duplicate becomes a dead click (the first one consumes the release via
+    // ClearActiveID() while itself not hovered). Scope by `this`, matching Draw()'s PushID( this ).
+    ImGui::PushID( this );
     SmallCheckbox( HeaderLabel(), &m_visible );
+    ImGui::PopID();
 }
 
 }
