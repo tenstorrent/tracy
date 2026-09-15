@@ -1,3 +1,7 @@
+#include <algorithm>
+
+#include "TracyColor.hpp"
+#include "TracyGallop.hpp"
 #include "TracyImGui.hpp"
 #include "TracyPopcnt.hpp"
 #include "TracyPrint.hpp"
@@ -6,12 +10,15 @@
 #include "TracyUtility.hpp"
 #include "TracyView.hpp"
 #include "TracyWorker.hpp"
+#include "../server/TracyTaskDispatch.hpp"
 
 namespace tracy
 {
 
+constexpr float MinVisSize = 3;
+
 TimelineItemGpu::TimelineItemGpu( View& view, Worker& worker, GpuCtxData* gpu )
-    : TimelineItem( view, worker, gpu, false )
+    : TimelineItem( view, worker, gpu, true )
     , m_gpu( gpu )
     , m_idx( view.GetNextGpuIdx() )
 {
@@ -211,9 +218,163 @@ int64_t TimelineItemGpu::RangeEnd() const
     return t;
 }
 
+void TimelineItemGpu::Preprocess( const TimelineContext& ctx, TaskDispatch& td, bool visible, int yPos )
+{
+    // Lanes appear as their first zone arrives during a live capture: re-sync with threadData whenever it
+    // grew, sorted by thread id so the rows keep a stable order.
+    if( m_lanes.size() != m_gpu->threadData.size() )
+    {
+        m_lanes.clear();
+        m_lanes.reserve( m_gpu->threadData.size() );
+        for( auto& t : m_gpu->threadData ) m_lanes.emplace_back( GpuLaneDraw { t.first, -1, 0, 0, 0, {} } );
+        std::sort( m_lanes.begin(), m_lanes.end(), [] ( const auto& l, const auto& r ) { return l.tid < r.tid; } );
+    }
+    m_measuredStart = ctx.vStart;
+    m_measuredEnd = ctx.vEnd;
+    m_measuredNspx = ctx.nspx;
+    m_measuredCount = m_gpu->count;
+    // GpuDrift may insert into the view's drift map, so resolve it here on the main thread.
+    const int drift = m_view.GetGpuDrift( m_gpu );
+    for( auto& lane : m_lanes )
+    {
+        assert( lane.draw.empty() );
+        auto it = m_gpu->threadData.find( lane.tid );
+        if( it == m_gpu->threadData.end() ) continue;
+        const GpuCtxThreadData* tdata = &it->second;
+        td.Queue( [this, &ctx, tdata, visible, drift, &lane] {
+            PreprocessLane( ctx, *tdata, visible, drift, lane );
+        } );
+    }
+}
+
+bool TimelineItemGpu::MeasureIsCurrent( const TimelineContext& ctx ) const
+{
+    return ctx.vStart == m_measuredStart && ctx.vEnd == m_measuredEnd && ctx.nspx == m_measuredNspx && m_gpu->count == m_measuredCount;
+}
+
+void TimelineItemGpu::PreprocessLane( const TimelineContext& ctx, const GpuCtxThreadData& td, bool visible, int drift, GpuLaneDraw& lane )
+{
+    auto& tl = td.timeline;
+    lane.begin = -1;
+    if( !tl.empty() )
+    {
+        lane.begin = tl.is_magic() ? ((Vector<GpuEvent>*)&tl)->front().GpuStart() : tl.front()->GpuStart();
+    }
+    lane.depth = lane.begin >= 0 ? PreprocessZoneLevel( ctx, tl, 0, visible, lane.begin, drift, 0, lane.draw ) : 0;
+
+    const auto begin = lane.begin >= 0 ? lane.begin : 0;
+    lane.markerBegin = lane.markerEnd = 0;
+    auto& mv = td.markers;
+    if( !mv.empty() )
+    {
+        auto it = std::lower_bound( mv.begin(), mv.end(), ctx.vStart, [begin, drift] ( const auto& lhs, const auto& rhs ) { return View::AdjustGpuTime( lhs->gpuTime, begin, drift ) < rhs; } );
+        if( it != mv.end() )
+        {
+            const auto zitend = std::lower_bound( it, mv.end(), ctx.vEnd+1, [begin, drift] ( const auto& lhs, const auto& rhs ) { return View::AdjustGpuTime( lhs->gpuTime, begin, drift ) < rhs; } );
+            lane.markerBegin = uint32_t( it - mv.begin() );
+            lane.markerEnd = uint32_t( zitend - mv.begin() );
+        }
+    }
+}
+
+void TimelineItemGpu::DrawFinished()
+{
+    for( auto& lane : m_lanes ) lane.draw.clear();
+}
+
 bool TimelineItemGpu::DrawContents( const TimelineContext& ctx, int& offset )
 {
-    return m_view.DrawGpu( ctx, *m_gpu, offset );
+    return m_view.DrawGpu( ctx, *m_gpu, m_lanes, offset );
 }
+
+int TimelineItemGpu::PreprocessZoneLevel( const TimelineContext& ctx, const Vector<short_ptr<GpuEvent>>& vec, int depth, bool visible, int64_t begin, int drift, uint32_t inheritedColor, std::vector<TimelineDraw>& draw )
+{
+    if( vec.is_magic() )
+    {
+        return PreprocessZoneLevel<VectorAdapterDirect<GpuEvent>>( ctx, *(Vector<GpuEvent>*)( &vec ), depth, visible, begin, drift, inheritedColor, draw );
+    }
+    else
+    {
+        return PreprocessZoneLevel<VectorAdapterPointer<GpuEvent>>( ctx, vec, depth, visible, begin, drift, inheritedColor, draw );
+    }
+}
+
+template<typename Adapter, typename V>
+int TimelineItemGpu::PreprocessZoneLevel( const TimelineContext& ctx, const V& vec, int depth, bool visible, int64_t begin, int drift, uint32_t inheritedColor, std::vector<TimelineDraw>& draw )
+{
+    if( depth >= 256 )
+    {
+        m_worker.NotifyExcessiveZoneDepth( View::AdjustGpuTime( Adapter{}( vec.front() ).GpuStart(), begin, drift ) );
+        return depth;
+    }
+
+    const auto vStart = ctx.vStart;
+    const auto vEnd = ctx.vEnd;
+    const auto nspx = ctx.nspx;
+
+    const auto MinVisNs = int64_t( round( ctx.scale * MinVisSize * nspx ) );
+
+    // GetZoneEnd gives an unended zone its start or its last descendant's end, never -1, so ends compare as plain
+    // signed times exactly as in the CPU walk.
+    auto zoneEnd = [this, begin, drift] ( const GpuEvent& ev ) { return View::AdjustGpuTime( m_worker.GetZoneEnd( ev ), begin, drift ); };
+
+    auto it = std::lower_bound( vec.begin(), vec.end(), vStart, [&zoneEnd] ( const auto& l, const auto& r ) { Adapter a; return zoneEnd( a(l) ) < r; } );
+    if( it == vec.end() ) return depth;
+
+    const auto zitend = std::lower_bound( it, vec.end(), vEnd, [begin, drift] ( const auto& l, const auto& r ) { Adapter a; return View::AdjustGpuTime( a(l).GpuStart(), begin, drift ) < r; } );
+    if( it == zitend ) return depth;
+    Adapter a;
+    if( zoneEnd( a(*(zitend-1)) ) < vStart ) return depth;
+
+    int maxdepth = depth + 1;
+
+    while( it < zitend )
+    {
+        auto& ev = a(*it);
+        const auto end = zoneEnd( ev );
+        const auto start = View::AdjustGpuTime( ev.GpuStart(), begin, drift );
+        const auto zsz = end - start;
+        if( zsz < MinVisNs )
+        {
+            auto nextTime = end + MinVisNs;
+            auto next = it + 1;
+            for(;;)
+            {
+                next = gallop_lower_bound( next, zitend, nextTime, [&zoneEnd] ( const auto& l, const auto& r ) { Adapter a; return zoneEnd( a(l) ) < r; } );
+                if( next == zitend ) break;
+                const auto pt = zoneEnd( a(*(next-1)) );
+                const auto nt = zoneEnd( a(*next) );
+                if( nt - pt >= MinVisNs ) break;
+                nextTime = nt + MinVisNs;
+            }
+            if( visible ) draw.emplace_back( TimelineDraw { TimelineDrawType::Folded, uint16_t( depth ), (void**)&ev, m_worker.GetZoneEnd( a(*(next-1)) ), uint32_t( next - it ), inheritedColor } );
+            it = next;
+        }
+        else
+        {
+            auto currentInherited = inheritedColor;
+            auto childrenInherited = inheritedColor;
+            if( m_view.GetViewData().inheritParentColors )
+            {
+                const auto color = m_worker.GetSourceLocation( ev.SrcLoc() ).color;
+                if( color != 0 )
+                {
+                    currentInherited = color | 0xFF000000;
+                    if( ev.Child() >= 0 ) childrenInherited = DarkenColorSlightly( color );
+                }
+            }
+            if( ev.Child() >= 0 )
+            {
+                const auto d = PreprocessZoneLevel( ctx, m_worker.GetGpuChildren( ev.Child() ), depth + 1, visible, begin, drift, childrenInherited, draw );
+                if( d > maxdepth ) maxdepth = d;
+            }
+            if( visible ) draw.emplace_back( TimelineDraw { TimelineDrawType::Zone, uint16_t( depth ), (void**)&ev, 0, 0, currentInherited } );
+            ++it;
+        }
+    }
+
+    return maxdepth;
+}
+
 
 }

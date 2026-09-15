@@ -201,6 +201,20 @@ static constexpr const uint32_t AsmSyntaxColors[] = {
     draw->AddText( pos, color, text );
 }
 
+// The longest prefix of `text` that fits in `maxWidth`, whole glyphs only, drawn without a clip rect: a clip rect
+// ends the current draw command, and a dense timeline shows thousands of labels per frame.
+[[maybe_unused]] static inline void DrawTextContrastClipped( ImDrawList* draw, const ImVec2& pos, uint32_t color, const char* text, float maxWidth )
+{
+    auto font = ImGui::GetFont();
+    const auto size = ImGui::GetFontSize();
+    const char* end;
+    font->CalcTextSizeA( size, maxWidth, 0.f, text, nullptr, &end );
+    if( end == text ) return;
+    const auto scale = round( GetScale() );
+    draw->AddText( font, size, pos + ImVec2( scale, scale ), 0xAA000000, text, end );
+    draw->AddText( font, size, pos, color, text, end );
+}
+
 [[maybe_unused]] static inline void DrawTextSuperContrast( ImDrawList* draw, const ImVec2& pos, uint32_t color, const char* text )
 {
     const auto scale = GetScale();

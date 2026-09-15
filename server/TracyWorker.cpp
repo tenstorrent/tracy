@@ -6074,6 +6074,8 @@ void Worker::ProcessGpuZoneBeginImplCommon( GpuEvent* zone, const QueueGpuZoneBe
     if( td == ctx->threadData.end() )
     {
         td = ctx->threadData.emplace( ztid, GpuCtxThreadData {} ).first;
+        // Per-thread contexts label each lane with the thread name; the id itself may legitimately be 0.
+        if( ctx->thread == 0 ) CheckThreadString( ztid );
     }
     auto timeline = &td->second.timeline;
     auto& stack = td->second.stack;
@@ -6365,7 +6367,13 @@ void Worker::ProcessGpuMarker( const QueueGpuMarker& ev )
     if( ctx->overflow != 0 ) tgpu += ctx->overflow * ctx->overflowMul;
     marker->gpuTime = ConvertGpuTime( ctx.get(), tgpu );
 
-    auto& vec = ctx->threadData[ev.thread].markers;
+    auto td = ctx->threadData.find( ev.thread );
+    if( td == ctx->threadData.end() )
+    {
+        td = ctx->threadData.emplace( ev.thread, GpuCtxThreadData {} ).first;
+        if( ctx->thread == 0 ) CheckThreadString( ev.thread );
+    }
+    auto& vec = td->second.markers;
     if( vec.empty() || vec.back()->gpuTime <= marker->gpuTime )
     {
         vec.push_back( marker );
@@ -6421,6 +6429,8 @@ void Worker::ProcessGpuZone( const QueueGpuZone& ev )
     if( td == ctx->threadData.end() )
     {
         td = ctx->threadData.emplace( ztid, GpuCtxThreadData {} ).first;
+        // Per-thread contexts label each lane with the thread name; the id itself may legitimately be 0.
+        if( ctx->thread == 0 ) CheckThreadString( ztid );
     }
     auto& tl = td->second.timeline;
 

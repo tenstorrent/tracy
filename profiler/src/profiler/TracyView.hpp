@@ -62,6 +62,7 @@ class FileRead;
 class SourceView;
 struct TimelineContext;
 struct TimelineDraw;
+struct GpuLaneDraw;
 struct ContextSwitchDraw;
 struct SamplesDraw;
 struct MessagesDraw;
@@ -219,8 +220,10 @@ public:
     void DrawThread( const TimelineContext& ctx, const ThreadData& thread, const std::vector<TimelineDraw>& draw, const std::vector<ContextSwitchDraw>& ctxDraw, const std::vector<SamplesDraw>& samplesDraw, const std::vector<std::unique_ptr<LockDraw>>& lockDraw, int& offset, int depth, bool hasCtxSwitches, bool hasSamples );
     void DrawThreadMessagesList( const TimelineContext& ctx, const std::vector<MessagesDraw>& drawList, int offset, uint64_t tid );
     void DrawThreadOverlays( const ThreadData& thread, const ImVec2& ul, const ImVec2& dr );
-    bool DrawGpu( const TimelineContext& ctx, const GpuCtxData& gpu, int& offset );
-    bool DrawGpuMarkers( const TimelineContext& ctx, const Vector<short_ptr<GpuMarkerData>>& vec, int offset, int64_t begin, int drift );
+    bool DrawGpu( const TimelineContext& ctx, const GpuCtxData& gpu, const std::vector<GpuLaneDraw>& lanes, int& offset );
+    int GetGpuDrift( const void* ptr ) { return GpuDrift( ptr ); }
+    static int64_t AdjustGpuTime( int64_t time, int64_t begin, int drift );
+    void DrawGpuMarkers( const TimelineContext& ctx, const Vector<short_ptr<GpuMarkerData>>& vec, uint32_t first, uint32_t last, int offset, int64_t begin, int drift );
     bool DrawCpuData( const TimelineContext& ctx, const std::vector<CpuUsageDraw>& cpuDraw, const std::vector<std::vector<CpuCtxDraw>>& ctxDraw, int& offset, bool hasCpuData );
     void DrawThreadMigrations( const TimelineContext& ctx, const int origOffset, uint64_t thread );
     bool DrawSourceTooltip( const char* filename, uint32_t lineStart, uint32_t lineEnd, int before = 3, int after = 3, bool separateTooltip = true );
@@ -328,11 +331,7 @@ private:
     void DrawZoneList( const TimelineContext& ctx, const std::vector<TimelineDraw>& drawList, int offset, uint64_t tid, int maxDepth, double margin );
     void DrawThreadCropper( const int depth, const uint64_t tid, const float xPos, const float yPos, const float ostep, const float cropperWidth, const bool hasCtxSwitches );
     void DrawContextSwitchList( const TimelineContext& ctx, const std::vector<ContextSwitchDraw>& drawList, const Vector<ContextSwitchData>& ctxSwitch, int offset, int endOffset, bool isFiber, uint64_t tid );
-    int DispatchGpuZoneLevel( const Vector<short_ptr<GpuEvent>>& vec, bool hover, double pxns, int64_t nspx, const ImVec2& wpos, int offset, int depth, uint64_t thread, float yMin, float yMax, int64_t begin, int drift );
-    template<typename Adapter, typename V>
-    int DrawGpuZoneLevel( const V& vec, bool hover, double pxns, int64_t nspx, const ImVec2& wpos, int offset, int depth, uint64_t thread, float yMin, float yMax, int64_t begin, int drift );
-    template<typename Adapter, typename V>
-    int SkipGpuZoneLevel( const V& vec, bool hover, double pxns, int64_t nspx, const ImVec2& wpos, int offset, int depth, uint64_t thread, float yMin, float yMax, int64_t begin, int drift );
+    void DrawGpuZoneList( const TimelineContext& ctx, const std::vector<TimelineDraw>& drawList, int offset, uint64_t thread, int64_t begin, int drift );
     void DrawLockHeader( uint32_t id, const LockMap& lockmap, const SourceLocation& srcloc, bool hover, ImDrawList* draw, const ImVec2& wpos, float w, float ty, float offset, uint8_t tid );
     int DrawLocks( const TimelineContext& ctx, const std::vector<std::unique_ptr<LockDraw>>& lockDraw, uint64_t tid, int _offset, LockHighlight& highlight );
     void DrawPlotPoint( const ImVec2& wpos, float x, float y, int offset, uint32_t color, bool hover, bool hasPrev, const PlotItem& item, double prev, PlotType type, PlotValueFormatting format, float PlotHeight, uint64_t name );
@@ -416,7 +415,7 @@ private:
     uint32_t GetZoneColor( const ZoneEvent& ev, uint64_t thread, int depth );
     uint32_t GetZoneColor( const GpuEvent& ev );
     ZoneColorData GetZoneColorData( const ZoneEvent& ev, uint64_t thread, int depth, uint32_t inheritedColor );
-    ZoneColorData GetZoneColorData( const GpuEvent& ev );
+    ZoneColorData GetZoneColorData( const GpuEvent& ev, uint32_t inheritedColor = 0 );
 
     void ZoomToZone( const ZoneEvent& ev );
     void ZoomToZone( const GpuEvent& ev );
@@ -557,7 +556,6 @@ private:
         } );
     }
 
-    static int64_t AdjustGpuTime( int64_t time, int64_t begin, int drift );
 
     static const char* DecodeContextSwitchState( uint8_t state );
     static const char* DecodeContextSwitchStateCode( uint8_t state );
@@ -598,6 +596,17 @@ private:
     const ZoneEvent* m_zoneHover = nullptr;
     DecayValue<const ZoneEvent*> m_zoneHover2 = nullptr;
     const GpuEvent* m_gpuHover = nullptr;
+
+    // Zone-name widths measured this frame with this font, keyed by the name's address: a dense timeline draws the
+    // same few names thousands of times.
+    struct
+    {
+        int frame = -1;
+        const ImFont* font = nullptr;
+        float size = 0;
+        unordered_flat_map<const char*, float> width;
+    } m_zoneNameWidth;
+    float ZoneNameWidth( const char* name );
     int m_frameHover = -1;
     bool m_messagesScrollBottom;
 
@@ -1028,7 +1037,7 @@ private:
         {
             Reset();
             match.emplace_back( srcloc );
-            strcpy( pattern, name );
+            strzcpy( pattern, name, sizeof( pattern ) );
         }
     } m_findZoneGpu;
 

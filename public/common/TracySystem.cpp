@@ -142,6 +142,22 @@ void ThreadNameMsvcMagic( const THREADNAME_INFO& info )
 }
 #endif
 
+#ifdef TRACY_ENABLE
+static void AddThreadNameData( uint32_t id, const char* name, int32_t groupHint )
+{
+    const auto sz = strlen( name );
+    char* buf = (char*)tracy_malloc( sz+1 );
+    memcpy( buf, name, sz );
+    buf[sz] = '\0';
+    auto data = (ThreadNameData*)tracy_malloc_fast( sizeof( ThreadNameData ) );
+    data->id = id;
+    data->groupHint = groupHint;
+    data->name = buf;
+    data->next = GetThreadNameData().load( std::memory_order_relaxed );
+    while( !GetThreadNameData().compare_exchange_weak( data->next, data, std::memory_order_release, std::memory_order_relaxed ) ) {}
+}
+#endif
+
 TRACY_API void SetThreadName( const char* name )
 {
     SetThreadNameWithHint( name, 0 );
@@ -208,18 +224,14 @@ TRACY_API void SetThreadNameWithHint( const char* name, int32_t groupHint )
     };
 #endif
 #ifdef TRACY_ENABLE
-    {
-        const auto sz = strlen( name );
-        char* buf = (char*)tracy_malloc( sz+1 );
-        memcpy( buf, name, sz );
-        buf[sz] = '\0';
-        auto data = (ThreadNameData*)tracy_malloc_fast( sizeof( ThreadNameData ) );
-        data->id = detail::GetThreadHandleImpl();
-        data->groupHint = groupHint;
-        data->name = buf;
-        data->next = GetThreadNameData().load( std::memory_order_relaxed );
-        while( !GetThreadNameData().compare_exchange_weak( data->next, data, std::memory_order_release, std::memory_order_relaxed ) ) {}
-    }
+    AddThreadNameData( detail::GetThreadHandleImpl(), name, groupHint );
+#endif
+}
+
+TRACY_API void SetThreadName( uint32_t id, const char* name )
+{
+#ifdef TRACY_ENABLE
+    AddThreadNameData( id, name, 0 );
 #endif
 }
 

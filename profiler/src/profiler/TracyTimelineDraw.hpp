@@ -2,6 +2,7 @@
 #define __TRACYTIMELINEDRAW_HPP__
 
 #include <stdint.h>
+#include <vector>
 
 #include "TracyEvent.hpp"
 #include "TracyShortPtr.hpp"
@@ -27,6 +28,17 @@ struct TimelineDraw
     uint32_t inheritedColor;
 };
 
+
+// One GPU context thread as preprocessed for the frame: its zone draw list, the nesting depth in view, and the
+// timestamp its zones are drawn relative to.
+struct GpuLaneDraw
+{
+    uint64_t tid;
+    int64_t begin;
+    int depth;
+    uint32_t markerBegin, markerEnd;    // the lane's device markers in view (Vector indices are 32-bit); the row draws when non-empty
+    std::vector<TimelineDraw> draw;
+};
 
 enum class ContextSwitchDrawType : uint8_t
 {
