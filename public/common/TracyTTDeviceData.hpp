@@ -137,9 +137,7 @@ struct MarkerDetails {
 const MarkerDetails UnidentifiedMarkerDetails = MarkerDetails("", "", 0);
 
 struct TTDeviceMarker {
-    // 0..63: 0-7 Tensix/eth/none, 8-31 Quasar processors. Was 3, which could not
-    // encode the Quasar entries (8..31) either -- pack_thread_id() asserts risc < (1 << RISC_BIT_COUNT).
-    // 6 + 4 + 4 + 8 = 22 bits, so the uint32_t static_assert below still holds.
+    // 0..63: 0-7 Tensix/eth/none, 8-31 Quasar processors.
     static constexpr uint64_t RISC_BIT_COUNT = 6;
     static constexpr uint64_t CORE_X_BIT_COUNT = 4;
     static constexpr uint64_t CORE_Y_BIT_COUNT = 4;

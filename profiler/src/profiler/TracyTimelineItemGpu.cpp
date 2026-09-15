@@ -233,6 +233,7 @@ void TimelineItemGpu::Preprocess( const TimelineContext& ctx, TaskDispatch& td, 
     m_measuredEnd = ctx.vEnd;
     m_measuredNspx = ctx.nspx;
     m_measuredCount = m_gpu->count;
+    m_measuredMarkers = MarkerCount();
     // GpuDrift may insert into the view's drift map, so resolve it here on the main thread.
     const int drift = m_view.GetGpuDrift( m_gpu );
     for( auto& lane : m_lanes )
@@ -249,7 +250,14 @@ void TimelineItemGpu::Preprocess( const TimelineContext& ctx, TaskDispatch& td, 
 
 bool TimelineItemGpu::MeasureIsCurrent( const TimelineContext& ctx ) const
 {
-    return ctx.vStart == m_measuredStart && ctx.vEnd == m_measuredEnd && ctx.nspx == m_measuredNspx && m_gpu->count == m_measuredCount;
+    return ctx.vStart == m_measuredStart && ctx.vEnd == m_measuredEnd && ctx.nspx == m_measuredNspx && m_gpu->count == m_measuredCount && MarkerCount() == m_measuredMarkers;
+}
+
+uint64_t TimelineItemGpu::MarkerCount() const
+{
+    uint64_t n = 0;
+    for( auto& td : m_gpu->threadData ) n += td.second.markers.size();
+    return n;
 }
 
 void TimelineItemGpu::PreprocessLane( const TimelineContext& ctx, const GpuCtxThreadData& td, bool visible, int drift, GpuLaneDraw& lane )
@@ -321,7 +329,9 @@ int TimelineItemGpu::PreprocessZoneLevel( const TimelineContext& ctx, const V& v
     auto it = std::lower_bound( vec.begin(), vec.end(), vStart, [&zoneEnd] ( const auto& l, const auto& r ) { Adapter a; return zoneEnd( a(l) ) < r; } );
     if( it == vec.end() ) return depth;
 
-    const auto zitend = std::lower_bound( it, vec.end(), vEnd, [begin, drift] ( const auto& l, const auto& r ) { Adapter a; return View::AdjustGpuTime( a(l).GpuStart(), begin, drift ) < r; } );
+    // A begin/end-style zone has GpuStart() == -1 until its timestamp arrives; compared as uint64_t it sorts past
+    // every real time, so such zones stay outside the range instead of breaking the partition.
+    const auto zitend = std::lower_bound( it, vec.end(), std::max<int64_t>( 0, vEnd ), [begin, drift] ( const auto& l, const auto& r ) { Adapter a; return (uint64_t)View::AdjustGpuTime( a(l).GpuStart(), begin, drift ) < (uint64_t)r; } );
     if( it == zitend ) return depth;
     Adapter a;
     if( zoneEnd( a(*(zitend-1)) ) < vStart ) return depth;

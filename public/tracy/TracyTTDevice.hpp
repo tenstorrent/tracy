@@ -98,19 +98,15 @@ namespace tracy {
             MemWrite(&item->gpuNewContext.period, (float)1.0f);
             MemWrite(&item->gpuNewContext.type, GpuContextType::tt_device);
             MemWrite(&item->gpuNewContext.context, GetId());
-            // GpuContextCalibration: each CalibrateTTContext re-anchors the server's device->host mapping (the real-time
-            // and DRAM profilers rely on it); a frozen-anchor consumer uses PopulateTTContextCalibrated and never calibrates.
+            // GpuContextCalibration lets CalibrateTTContext re-anchor the server's device->host mapping and hides the
+            // GUI's per-context drift control. A consumer that never calibrates keeps the mapping it populated with.
             MemWrite(&item->gpuNewContext.flags, GpuContextCalibration);
             Profiler::QueueSerialFinish();
 
             mm_tcpu = tcpu;
         }
 
-        // Same anchor mapping as PopulateTTContext but marks the context CALIBRATED, so the Tracy GUI does
-        // NOT show the per-context manual "Drift (ns/s)/Auto" control (server shows it only when
-        // !hasCalibration). We send NO GpuCalibration events, so calibrationMod stays 1.0 and the mapping is
-        // identical to the uncalibrated path (gpuTime = tgpu + timeDiff either way). For consumers whose
-        // device timestamps are host-rebased (perf-debug profiler): the anchor is exact, no drift wanted.
+        // Identical to PopulateTTContext on the wire; the serial counterpart of PopulateTTContextCalibratedLockfree.
         void PopulateTTContextCalibrated(int64_t tcpu, double tgpu, double frequency) {
             m_frequency = frequency;
             m_tgpu = tgpu;
@@ -122,12 +118,8 @@ namespace tracy {
             MemWrite(&item->gpuNewContext.cpuTime, tcpu);
             MemWrite(&item->gpuNewContext.gpuTime, (int64_t)round((double)m_tgpu / m_frequency));
             memset(&item->gpuNewContext.thread, 0, sizeof(item->gpuNewContext.thread));
-            // period = ns per timestamp unit, and it MUST be 1.0 here: PushStartMarker/PushEndMarker already
-            // convert device cycles to ns themselves (they send `marker.timestamp / m_frequency`), so the
-            // values on the wire are ALREADY nanoseconds. An earlier revision set this to 1/frequency on the
-            // false premise that raw CYCLES were pushed -- that double-divided and shrank every device zone
-            // by exactly aiclk_GHz (a 6.38 us zone displayed as 4.73 us at 1.35 GHz). If you ever switch the
-            // push path to send raw cycles, change BOTH sites together.
+            // period is ns per timestamp unit and must be 1.0: PushStartMarker/PushEndMarker convert device cycles to
+            // ns (marker.timestamp / m_frequency) before they reach the wire.
             MemWrite(&item->gpuNewContext.period, (float)1.0f);
             MemWrite(&item->gpuNewContext.type, GpuContextType::tt_device);
             MemWrite(&item->gpuNewContext.context, GetId());

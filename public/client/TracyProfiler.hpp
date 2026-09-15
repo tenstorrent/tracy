@@ -461,33 +461,15 @@ public:
         TracyLfqCommit;
     }
 
-    // ---- Plot samples at a CALLER-SUPPLIED time (tt-metal addition) --------------------------------------
+    // PlotData with a caller-supplied time, for values that describe an event decoded after it happened. Same
+    // queue items and server path as PlotData; only the stamp differs.
     //
-    // PlotData() above stamps GetTime(), i.e. the instant the call is made. That is wrong for any value that
-    // describes a DEVICE event: the tt-metal perf-debug profiler decodes device markers milliseconds after
-    // the device produced them (the drainer's DRAM ring alone trails the last worker zone by 2.5-2.9 ms), so
-    // a plot stamped at decode time lands to the RIGHT of the zones it explains and is worse than no plot.
-    //
-    // The time is already carried on the wire -- QueuePlotDataBase{name, time} -- and the server converts it
-    // with TscTime(RefTime(...)), so nothing but this stamp needs to change. There is deliberately NO server,
-    // wire-format, GUI or tracy-capture change: PlotDataInt/Float/Double are the same queue types, decoded by
-    // the same path.
-    //
-    // `tsc` must be in the SAME domain Profiler::GetTime() returns (raw TSC on x86, not nanoseconds). To place
-    // a sample at the same displayed instant as a device zone at device timestamp `dev`, the caller wants
+    // `tsc` is in the domain Profiler::GetTime() returns (raw TSC on x86, not ns). A sample meant to line up with
+    // a GPU-context zone at device timestamp `dev` uses the inverse of the server's device->host mapping:
     //     tsc = (dev/freq - anchor/freq) / GetTimerMul() + host_anchor
-    // which is the exact inverse of the server's device-zone mapping: the server displays a GPU zone at
-    // ConvertGpuTime(tgpu) = tgpu - anchor_ns + TscTime(host_anchor) and a plot at TscTime(tsc), and equating
-    // the two cancels the server-private baseTime entirely. Derived and checked against
-    // Worker::ProcessGpuNewContext (timeDiff = TscTime(cpuTime) - gpuTime) and Worker::TscTime.
-    //
-    // The delta encoder in Dequeue() handles a backdated stamp without complaint -- it is a plain running
-    // subtraction (`dt = t - refThread; refThread = t;`) with no ordering assertion, exactly as GpuZoneEnd's
-    // cpuTime already relies on. Two caller obligations remain, because neither is checked here:
-    //   * `name` must stay valid FOREVER (the server queries the client to dereference it), so intern or leak
-    //     it -- never pass c_str() of a temporary.
-    //   * emit samples per name in non-decreasing time order where possible; the server's plot vector is a
-    //     SortedVector, so out-of-order insertion is tolerated but costs a sort.
+    // A backdated stamp is fine: the delta encoder is a running subtraction with no ordering check. The caller
+    // must keep `name` alive for the life of the process (the server dereferences it on demand) and should emit
+    // each name's samples in non-decreasing time order; out-of-order samples are accepted but cost a sort.
     static tracy_force_inline void PlotDataAt( const char* name, int64_t val, int64_t tsc )
     {
         if( GetProfiler().IsEmitSuppressed() ) return;

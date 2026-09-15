@@ -405,12 +405,13 @@ void View::DrawFindZoneGpu()
             const auto vsz = vec.size();
             if( vsz != 0 )
             {
+                auto Percentile = [&vec, vsz]( double p ) { return vec[std::min<size_t>( vsz - 1, p * vsz )]; };
                 m_findZoneGpu.average = float( total ) / vsz;
-                m_findZoneGpu.median = vec[vsz/2];
-                m_findZoneGpu.p75 = vec[3 * (vsz / 4)];
-                m_findZoneGpu.p90 = vec[vsz / 10 * 9];
-                m_findZoneGpu.p99 = vec[size_t(float(vsz * 0.99))];
-                m_findZoneGpu.p99_9 = vec[size_t(float(vsz * 0.999))];
+                m_findZoneGpu.median = Percentile( 0.5 );
+                m_findZoneGpu.p75    = Percentile( 0.75 );
+                m_findZoneGpu.p90    = Percentile( 0.9 );
+                m_findZoneGpu.p99    = Percentile( 0.99 );
+                m_findZoneGpu.p99_9  = Percentile( 0.999 );
                 m_findZoneGpu.total = total;
                 m_findZoneGpu.sumSq = sumSq;
                 m_findZoneGpu.sortedNum = i;

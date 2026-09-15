@@ -365,13 +365,13 @@ void View::DrawStatistics()
                 if( it->second.total == 0 ) continue;
                 auto ait = acc.find( it->first );
                 if( ait == acc.end() || ait->second.first == 0 ) continue;
+                slzcnt++;
                 if( filterActive )
                 {
                     auto& sl = m_worker.GetSourceLocation( it->first );
                     auto name = m_worker.GetString( sl.name.active ? sl.name : sl.function );
                     if( !m_statisticsFilter.PassFilter( name ) ) continue;
                 }
-                slzcnt++;
                 srcloc.push_back_no_space_check( SrcLocZonesSlim { it->first, 0, size_t( ait->second.first ), ait->second.second } );
             }
         }

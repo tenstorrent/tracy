@@ -162,6 +162,15 @@ static ImGuiKey TranslateKeyCode( const char* code )
     return ImGuiKey_None;
 }
 
+static void UpdateKeyModifiers( const EmscriptenKeyboardEvent* e )
+{
+    ImGuiIO& io = ImGui::GetIO();
+    io.AddKeyEvent( ImGuiMod_Ctrl, e->ctrlKey );
+    io.AddKeyEvent( ImGuiMod_Shift, e->shiftKey );
+    io.AddKeyEvent( ImGuiMod_Alt, e->altKey );
+    io.AddKeyEvent( ImGuiMod_Super, e->metaKey );
+}
+
 // Convert a browser wheel delta to the unit the rest of the profiler expects: 1.0 is one
 // notch of a discrete mouse wheel, and high resolution wheels or touchpads produce
 // fractional values. The other backends already follow this convention (Wayland divides
@@ -266,6 +275,7 @@ Backend::Backend( const char* title, const std::function<void()>& redraw, const 
         return EM_TRUE;
     } );
     emscripten_set_keydown_callback( EMSCRIPTEN_EVENT_TARGET_WINDOW, nullptr, EM_TRUE, [] ( int, const EmscriptenKeyboardEvent* e, void* ) -> EM_BOOL {
+        UpdateKeyModifiers( e );
         const auto code = TranslateKeyCode( e->code );
         if( code == ImGuiKey_None ) return EM_FALSE;
         ImGui::GetIO().AddKeyEvent( code, true );
@@ -273,6 +283,7 @@ Backend::Backend( const char* title, const std::function<void()>& redraw, const 
         return EM_TRUE;
     } );
     emscripten_set_keyup_callback( EMSCRIPTEN_EVENT_TARGET_WINDOW, nullptr, EM_TRUE, [] ( int, const EmscriptenKeyboardEvent* e, void* ) -> EM_BOOL {
+        UpdateKeyModifiers( e );
         const auto code = TranslateKeyCode( e->code );
         if( code == ImGuiKey_None ) return EM_FALSE;
         ImGui::GetIO().AddKeyEvent( code, false );

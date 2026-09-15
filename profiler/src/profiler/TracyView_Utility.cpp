@@ -666,11 +666,13 @@ void View::BuildGpuZoneIndex( bool wantZones, int16_t srcloc, bool needStats, co
 
     for( uint32_t ci=0; ci<gpuData.size(); ci++ )
     {
+        // A context bound to one thread keys its timeline under 0; the owning thread is the context's.
+        const auto ctxThread = gpuData[ci]->thread;
         for( const auto& td : gpuData[ci]->threadData )
         {
             if( td.second.timeline.empty() ) continue;
             const auto owner = uint32_t( idx.owners.size() );
-            idx.owners.push_back( GpuZoneIndex::Owner { ci, td.first } );
+            idx.owners.push_back( GpuZoneIndex::Owner { ci, ctxThread != 0 ? ctxThread : td.first } );
             Walk( td.second.timeline, owner );
         }
     }

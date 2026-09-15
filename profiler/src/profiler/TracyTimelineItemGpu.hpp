@@ -39,6 +39,7 @@ protected:
     bool MeasureIsCurrent( const TimelineContext& ctx ) const override;
 
 private:
+    uint64_t MarkerCount() const;
     void PreprocessLane( const TimelineContext& ctx, const GpuCtxThreadData& td, bool visible, int drift, GpuLaneDraw& lane );
     int PreprocessZoneLevel( const TimelineContext& ctx, const Vector<short_ptr<GpuEvent>>& vec, int depth, bool visible, int64_t begin, int drift, uint32_t inheritedColor, std::vector<TimelineDraw>& draw );
 
@@ -52,6 +53,7 @@ private:
     int64_t m_measuredEnd = 0;
     double m_measuredNspx = 0;
     uint64_t m_measuredCount = 0;
+    uint64_t m_measuredMarkers = 0;
 };
 
 }

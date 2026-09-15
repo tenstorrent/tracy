@@ -1048,7 +1048,6 @@ private:
     // Restrict GPU statistics and GPU zone search to the contexts that are currently
     // visible in Options -> GPU zones.
     bool m_gpuCtxLimit = false;
-    uint64_t m_gpuStatCacheCtxHash = 0;
 
     // GpuZoneThreadData carries no context id, and its thread field cannot stand in for one:
     // the worker fills it with a compressed thread id during live capture but with the raw

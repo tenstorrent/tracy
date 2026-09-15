@@ -6482,7 +6482,8 @@ static MemEvent* MemDataFree( MemData& memdata, unordered_flat_map<uint64_t, siz
     mem.SetTimeThreadFree( time, thread );
     memdata.usage -= mem.Size();
     memdata.active.erase( it );
-    return &mem;}
+    return &mem;
+}
 
 MemEvent* Worker::ProcessMemAllocImpl( MemData& memdata, const QueueMemAlloc& ev )
 {
