@@ -162,7 +162,15 @@ void TimelineItem::AdjustThreadHeight( bool firstFrame, int yBegin, int yEnd )
 
 void TimelineItem::VisibilityCheckbox()
 {
+    // HeaderLabel() is a display string, not an identity: a named GPU context (TracyGpuContextName)
+    // may repeat, e.g. a client that opens/closes several profiling sessions in one run creates a
+    // fresh context per session with the same name. ImGui derives the checkbox id from the label, so
+    // duplicate labels collide on one ImGuiID and only the first item submitted in the frame can be
+    // toggled -- every later duplicate becomes a dead click (the first one consumes the release via
+    // ClearActiveID() while itself not hovered). Scope by `this`, matching Draw()'s PushID( this ).
+    ImGui::PushID( this );
     SmallCheckbox( HeaderLabel(), &m_visible );
+    ImGui::PopID();
 }
 
 }
