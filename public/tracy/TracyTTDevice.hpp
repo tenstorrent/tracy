@@ -12,8 +12,8 @@
 #define TracyTTContextPopulateCalibratedLockfree(c, x, y, z)
 #define TracyTTPushStartZone(c, e)
 #define TracyTTPushEndZone(c, e)
-#define TracyTTPushMarker(c, e)
-#define TracyTTPushMarkerLockfree(c, e)
+#define TracyTTPushMarker(c, e, t)
+#define TracyTTPushMarkerLockfree(c, e, t)
 #define TracyTTPushZone(c, s, t, b, e)
 #define TracyTTPushZoneSerial(c, s, t, b, e)
 
@@ -322,7 +322,7 @@ namespace tracy {
         // A point-in-time device event (TS_EVENT / TS_DATA / TS_DATA_16B) rather than a zone. The
         // source location carries only the event's identity so that the server interns one per event
         // type; everything that varies per event goes in the metadata string.
-        void PushMarker(const TTDeviceMarker& marker) {
+        void PushMarker(const TTDeviceMarker& marker, uint32_t thread) {
             if (tracy::GetProfiler().IsEmitSuppressed()) {
                 return;
             }
@@ -356,7 +356,7 @@ namespace tracy {
             MemWrite(&item->hdr.type, QueueType::GpuMarker);
             MemWrite(&item->gpuMarker.gpuTime, (int64_t)round((double)marker.timestamp / m_frequency));
             MemWrite(&item->gpuMarker.srcloc, srcloc);
-            MemWrite(&item->gpuMarker.thread, (uint32_t)marker.get_thread_id());
+            MemWrite(&item->gpuMarker.thread, thread);
             MemWrite(&item->gpuMarker.context, this->GetId());
             MemWrite(&item->gpuMarker.markerType, (uint8_t)marker.marker_type);
             Profiler::QueueSerialFinish();
@@ -365,7 +365,7 @@ namespace tracy {
         // Lock-free twin of PushMarker. Use only when this context was also created lock-free on this
         // thread: the client drains the lock-free queues before the serial one, and they are per-thread,
         // so either mismatch lets a marker reach the server ahead of the context it references.
-        void PushMarkerLockfree(const TTDeviceMarker& marker) {
+        void PushMarkerLockfree(const TTDeviceMarker& marker, uint32_t thread) {
             if (tracy::GetProfiler().IsEmitSuppressed()) {
                 return;
             }
@@ -397,7 +397,7 @@ namespace tracy {
             TracyLfqPrepare(QueueType::GpuMarker);
             MemWrite(&item->gpuMarker.gpuTime, (int64_t)round((double)marker.timestamp / m_frequency));
             MemWrite(&item->gpuMarker.srcloc, srcloc);
-            MemWrite(&item->gpuMarker.thread, (uint32_t)marker.get_thread_id());
+            MemWrite(&item->gpuMarker.thread, thread);
             MemWrite(&item->gpuMarker.context, this->GetId());
             MemWrite(&item->gpuMarker.markerType, (uint8_t)marker.marker_type);
             TracyLfqCommit;
@@ -502,8 +502,8 @@ using TracyTTCtx = tracy::TTCtx*;
 #define TracyTTContextCalibrate(ctx, cpuTime, timeshift, frequency) ctx->CalibrateTTContext(cpuTime, timeshift, frequency)
 #define TracyTTPushStartMarker(ctx, marker) ctx->PushStartMarker(marker)
 #define TracyTTPushEndMarker(ctx, marker) ctx->PushEndMarker(marker)
-#define TracyTTPushMarker(ctx, marker) ctx->PushMarker(marker)
-#define TracyTTPushMarkerLockfree(ctx, marker) ctx->PushMarkerLockfree(marker)
+#define TracyTTPushMarker(ctx, marker, thread) ctx->PushMarker(marker, thread)
+#define TracyTTPushMarkerLockfree(ctx, marker, thread) ctx->PushMarkerLockfree(marker, thread)
 #define TracyTTPushZone(ctx, srcloc, thread, start, end) ctx->PushZone(srcloc, thread, start, end)
 #define TracyTTPushZoneSerial(ctx, srcloc, thread, start, end) ctx->PushZoneSerial(srcloc, thread, start, end)
 
