@@ -283,6 +283,22 @@ namespace tracy {
             return meta;
         }
 
+        // AllocSourceLocation stores its total size (12 bytes plus three strings) in 16 bits,
+        // so each string is cut to a third of what remains.
+        static uint64_t AllocMarkerSourceLocation(
+            const TTDeviceMarker& marker, const std::string& function, tracy::Color::ColorType color) {
+            constexpr size_t maxLength = (std::numeric_limits<uint16_t>::max() - 12) / 3;
+            return Profiler::AllocSourceLocation(
+                marker.line,
+                marker.file.c_str(),
+                std::min<size_t>(marker.file.length(), maxLength),
+                function.c_str(),
+                std::min<size_t>(function.length(), maxLength),
+                marker.marker_name.c_str(),
+                std::min<size_t>(marker.marker_name.length(), maxLength),
+                color);
+        }
+
         void PushStartMarker(const TTDeviceMarker& marker) {
             if (tracy::GetProfiler().IsEmitSuppressed()) {
                 return;
@@ -292,15 +308,7 @@ namespace tracy {
 
             const tracy::Color::ColorType color = this->getMarkerColor(marker);
 
-            const auto srcloc = Profiler::AllocSourceLocation(
-                marker.line,
-                marker.file.c_str(),
-                marker.file.length(),
-                run_id_string.c_str(),
-                run_id_string.length(),
-                marker.marker_name.c_str(),
-                marker.marker_name.length(),
-                color);
+            const auto srcloc = AllocMarkerSourceLocation(marker, run_id_string, color);
 
             auto zoneBegin = Profiler::QueueSerial();
             MemWrite(&zoneBegin->hdr.type, QueueType::GpuZoneBeginAllocSrcLocSerial);
@@ -328,15 +336,7 @@ namespace tracy {
             }
             const tracy::Color::ColorType color = this->getMarkerColor(marker);
 
-            const auto srcloc = Profiler::AllocSourceLocation(
-                marker.line,
-                marker.file.c_str(),
-                marker.file.length(),
-                "",
-                0,
-                marker.marker_name.c_str(),
-                marker.marker_name.length(),
-                color);
+            const auto srcloc = AllocMarkerSourceLocation(marker, "", color);
 
             const std::string meta = this->getMarkerMetaString(marker);
             if (!meta.empty()) {
@@ -371,15 +371,7 @@ namespace tracy {
             }
             const tracy::Color::ColorType color = this->getMarkerColor(marker);
 
-            const auto srcloc = Profiler::AllocSourceLocation(
-                marker.line,
-                marker.file.c_str(),
-                marker.file.length(),
-                "",
-                0,
-                marker.marker_name.c_str(),
-                marker.marker_name.length(),
-                color);
+            const auto srcloc = AllocMarkerSourceLocation(marker, "", color);
 
             const std::string meta = this->getMarkerMetaString(marker);
             if (!meta.empty()) {
