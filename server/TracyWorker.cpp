@@ -6521,16 +6521,33 @@ void Worker::AppendZoneText( ZoneExtra& extra, const char* str, size_t len )
 
 void Worker::ProcessGpuZoneText( const QueueGpuZoneText& ev )
 {
-    const auto str = GetString( StringIdx( GetSingleStringIdx() ) );
+    const auto ptr = m_pendingSingleString.ptr;
+    const auto idx = GetSingleStringIdx();
     auto zone = GetLastGpuZone( ev.context, ev.thread );
-    if( !zone ) return;
-    AppendZoneText( RequestZoneExtra( *zone ), str, strlen( str ) );
+    if( !zone )
+    {
+        ZoneTextFailure( ev.thread, ptr );
+        return;
+    }
+    auto& extra = RequestZoneExtra( *zone );
+    if( !extra.text.Active() )
+    {
+        extra.text = StringIdx( idx );
+    }
+    else
+    {
+        AppendZoneText( extra, ptr, strlen( ptr ) );
+    }
 }
 
 void Worker::ProcessGpuZoneColor( const QueueGpuZoneColor& ev )
 {
     auto zone = GetLastGpuZone( ev.context, ev.thread );
-    if( !zone ) return;
+    if( !zone )
+    {
+        ZoneColorFailure( ev.thread );
+        return;
+    }
     const uint32_t color = ( ev.b << 16 ) | ( ev.g << 8 ) | ev.r;
     RequestZoneExtra( *zone ).color = color;
 }
@@ -6538,7 +6555,11 @@ void Worker::ProcessGpuZoneColor( const QueueGpuZoneColor& ev )
 void Worker::ProcessGpuZoneValue( const QueueGpuZoneValue& ev )
 {
     auto zone = GetLastGpuZone( ev.context, ev.thread );
-    if( !zone ) return;
+    if( !zone )
+    {
+        ZoneValueFailure( ev.thread, ev.value );
+        return;
+    }
     char tmp[64];
     const auto tsz = sprintf( tmp, "%" PRIu64 " [0x%" PRIx64 "]", ev.value, ev.value );
     AppendZoneText( RequestZoneExtra( *zone ), tmp, tsz );
