@@ -366,7 +366,17 @@ int TimelineItemGpu::PreprocessZoneLevel( const TimelineContext& ctx, const V& v
             auto childrenInherited = inheritedColor;
             if( m_view.GetViewData().inheritParentColors )
             {
-                const auto color = m_worker.GetSourceLocation( ev.SrcLoc() ).color;
+                uint32_t color = 0;
+                if( m_worker.HasZoneExtra( ev ) )
+                {
+                    const auto& extra = m_worker.GetZoneExtra( ev );
+                    color = extra.color.Val();
+                }
+                if( color == 0 )
+                {
+                    auto& srcloc = m_worker.GetSourceLocation( ev.SrcLoc() );
+                    color = srcloc.color;
+                }
                 if( color != 0 )
                 {
                     currentInherited = color | 0xFF000000;

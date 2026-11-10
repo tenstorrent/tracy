@@ -77,8 +77,17 @@ uint32_t View::GetZoneColor( const ZoneEvent& ev, uint64_t thread, int depth )
 uint32_t View::GetZoneColor( const GpuEvent& ev )
 {
     const auto& srcloc = m_worker.GetSourceLocation( ev.SrcLoc() );
-    const auto color = srcloc.color;
-    return color != 0 ? ( color | 0xFF000000 ) : 0xFF222288;
+    if( !m_vd.forceColors )
+    {
+        if( m_worker.HasZoneExtra( ev ) )
+        {
+            const auto custom_color = m_worker.GetZoneExtra( ev ).color.Val();
+            if( custom_color != 0 ) return custom_color | 0xFF000000;
+        }
+        const auto color = srcloc.color;
+        if( color != 0 ) return color | 0xFF000000;
+    }
+    return 0xFF222288;
 }
 
 View::ZoneColorData View::GetZoneColorData( const ZoneEvent& ev, uint64_t thread, int depth, uint32_t inheritedColor )

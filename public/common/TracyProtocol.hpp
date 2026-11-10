@@ -11,7 +11,7 @@ namespace tracy
 constexpr unsigned Lz4CompressBound( unsigned isize ) { return isize + ( isize / 255 ) + 16; }
 
 // Upstream v0.14.1's 82 + 1 for the TT GpuZone/marker queue items, so a fork stream never passes as an upstream one.
-constexpr uint32_t ProtocolVersion = 83;
+constexpr uint32_t ProtocolVersion = 84;
 constexpr uint16_t BroadcastVersion = 3;
 
 using lz4sz_t = uint32_t;

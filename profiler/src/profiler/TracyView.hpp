@@ -652,6 +652,7 @@ private:
     ImGuiTextFilter m_statisticsFilter;
     ImGuiTextFilter m_statisticsImageFilter;
     ImGuiTextFilter m_userTextFilter;
+    ImGuiTextFilter m_gpuUserTextFilter;
     unordered_flat_set<Worker::ZoneThreadData*> m_filteredZones;
 
     Region m_highlight;
@@ -931,7 +932,7 @@ private:
 
     struct FindZoneGpu {
         static constexpr uint64_t Unselected = std::numeric_limits<uint64_t>::max() - 1;
-        enum class GroupBy : int { Context, Thread, NoGrouping };
+        enum class GroupBy : int { Context, Thread, UserText, NoGrouping };
         enum class SortBy : int { Order, Count, Time, Mtpc };
 
         struct Group

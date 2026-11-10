@@ -15,7 +15,9 @@
 #define TracyTTPushMarker(c, e, t)
 #define TracyTTPushMarkerLockfree(c, e, t)
 #define TracyTTPushZone(c, s, t, b, e)
-#define TracyTTPushZoneSerial(c, s, t, b, e)
+#define TracyTTPushZoneText(c, t, x, y)
+#define TracyTTPushZoneValue(c, t, v)
+#define TracyTTPushZoneColor(c, t, v)
 
 #define TracyGetTimerMul() 0
 #define TracyGetBaseTime() 0
@@ -418,25 +420,46 @@ namespace tracy {
             TracyLfqCommit;
         }
 
-        // SERIAL-queue twin of PushZone, same wire item. Use this when the same producer also sends
-        // SERIAL items that reference this context (GpuNewContext, markers): the client drains the
-        // lock-free queues BEFORE the serial one each pass, so a lock-free zone can overtake a serial
-        // GpuNewContext enqueued earlier -- and the server hard-asserts on an unknown context. One
-        // serial item per zone is still strictly cheaper than the legacy begin/end pair (two serial
-        // items plus an alloc'd srcloc). Same ordering contract: per (context, thread), completion order.
-        tracy_force_inline void PushZoneSerial(
-            const SourceLocationData* srcloc, uint32_t thread, uint64_t start, uint64_t end) {
+        // Text, value and colour for the zone most recently pushed on `thread` with PushZone, like ZoneText, ZoneValue
+        // and ZoneColor on a CPU zone. Call them from the thread that pushed the zone. Text and value each add a line
+        // to the zone's text.
+        void PushZoneText(uint32_t thread, const char* text, size_t size) {
             if (tracy::GetProfiler().IsEmitSuppressed()) {
                 return;
             }
-            auto item = Profiler::QueueSerial();
-            MemWrite(&item->hdr.type, QueueType::GpuZone);
-            MemWrite(&item->gpuZone.gpuStart, (int64_t)round((double)start / m_frequency));
-            MemWrite(&item->gpuZone.gpuEnd, (int64_t)round((double)end / m_frequency));
-            MemWrite(&item->gpuZone.srcloc, (uint64_t)srcloc);
-            MemWrite(&item->gpuZone.thread, thread);
-            MemWrite(&item->gpuZone.context, GetId());
-            Profiler::QueueSerialFinish();
+            const uint16_t len = (uint16_t)std::min<size_t>(size, std::numeric_limits<uint16_t>::max());
+            auto ptr = (char*)tracy_malloc(len);
+            memcpy(ptr, text, len);
+            TracyLfqPrepare(QueueType::GpuZoneText);
+            MemWrite(&item->gpuZoneTextFat.thread, thread);
+            MemWrite(&item->gpuZoneTextFat.context, GetId());
+            MemWrite(&item->gpuZoneTextFat.text, (uint64_t)ptr);
+            MemWrite(&item->gpuZoneTextFat.size, len);
+            TracyLfqCommit;
+        }
+
+        tracy_force_inline void PushZoneValue(uint32_t thread, uint64_t value) {
+            if (tracy::GetProfiler().IsEmitSuppressed()) {
+                return;
+            }
+            TracyLfqPrepare(QueueType::GpuZoneValue);
+            MemWrite(&item->gpuZoneValue.value, value);
+            MemWrite(&item->gpuZoneValue.thread, thread);
+            MemWrite(&item->gpuZoneValue.context, GetId());
+            TracyLfqCommit;
+        }
+
+        tracy_force_inline void PushZoneColor(uint32_t thread, uint32_t color) {
+            if (tracy::GetProfiler().IsEmitSuppressed()) {
+                return;
+            }
+            TracyLfqPrepare(QueueType::GpuZoneColor);
+            MemWrite(&item->gpuZoneColor.thread, thread);
+            MemWrite(&item->gpuZoneColor.context, GetId());
+            MemWrite(&item->gpuZoneColor.b, uint8_t(color & 0xFF));
+            MemWrite(&item->gpuZoneColor.g, uint8_t((color >> 8) & 0xFF));
+            MemWrite(&item->gpuZoneColor.r, uint8_t((color >> 16) & 0xFF));
+            TracyLfqCommit;
         }
 
         void PushEndMarker(const TTDeviceMarker& marker) {
@@ -505,7 +528,9 @@ using TracyTTCtx = tracy::TTCtx*;
 #define TracyTTPushMarker(ctx, marker, thread) ctx->PushMarker(marker, thread)
 #define TracyTTPushMarkerLockfree(ctx, marker, thread) ctx->PushMarkerLockfree(marker, thread)
 #define TracyTTPushZone(ctx, srcloc, thread, start, end) ctx->PushZone(srcloc, thread, start, end)
-#define TracyTTPushZoneSerial(ctx, srcloc, thread, start, end) ctx->PushZoneSerial(srcloc, thread, start, end)
+#define TracyTTPushZoneText(ctx, thread, text, size) ctx->PushZoneText(thread, text, size)
+#define TracyTTPushZoneValue(ctx, thread, value) ctx->PushZoneValue(thread, value)
+#define TracyTTPushZoneColor(ctx, thread, color) ctx->PushZoneColor(thread, color)
 
 #define TracyGetTimerMul() tracy::get_tracy_timer_mul()
 #define TracyGetBaseTime() tracy::get_tracy_base_time()

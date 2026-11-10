@@ -1571,6 +1571,17 @@ void View::DrawGpuInfoWindow()
             ImGui::SameLine();
             TextColoredUnformatted( ImVec4( 0.2f, 0.6f, 0.2f, 1.f ), "Fiber" );
         }
+        if( m_worker.HasZoneExtra( ev ) && m_worker.GetZoneExtra( ev ).text.Active() )
+        {
+            TextDisabledUnformatted( "User text:" );
+            ImGui::SameLine();
+            if( ClipboardButton( 4 ) )
+            {
+                ImGui::SetClipboardText( m_worker.GetString( m_worker.GetZoneExtra( ev ).text ) );
+            }
+            ImGui::SameLine();
+            ImGui::TextUnformatted( m_worker.GetString( m_worker.GetZoneExtra( ev ).text ) );
+        }
         ImGui::Separator();
         ImGui::BeginChild( "##gpuinfo" );
 
@@ -2192,6 +2203,16 @@ void View::ZoneTooltip( const GpuEvent& ev )
             {
                 TextFocused( RealToString( p.first ), RealToString( p.second ) );
             }
+        }
+    }
+
+    if( m_worker.HasZoneExtra( ev ) )
+    {
+        auto& extra = m_worker.GetZoneExtra( ev );
+        if( extra.text.Active() )
+        {
+            ImGui::Separator();
+            TextColoredUnformatted( ImVec4( 0xCC / 255.f, 0xCC / 255.f, 0x22 / 255.f, 1.f ), m_worker.GetString( extra.text ) );
         }
     }
 

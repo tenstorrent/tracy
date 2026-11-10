@@ -77,6 +77,7 @@ enum class QueueType : uint8_t
     GpuAnnotationName,
     GpuMarkerMeta,
     GpuMarker,
+    GpuZoneText,
     CallstackFrameSize,
     SymbolInformation,
     ExternalNameMetadata,
@@ -93,6 +94,8 @@ enum class QueueType : uint8_t
     GpuCalibration,
     GpuTimeSync,
     GpuZone,
+    GpuZoneColor,
+    GpuZoneValue,
     Crash,
     CrashReport,
     ZoneValidation,
@@ -613,6 +616,36 @@ struct QueueGpuZone
     uint16_t context;
 };
 
+// Text, colour and value for a device zone that was sent as a QueueGpuZone. Each applies to the zone most recently
+// sent for the same context and thread.
+struct QueueGpuZoneText
+{
+    uint32_t thread;
+    uint16_t context;
+};
+
+struct QueueGpuZoneTextFat : public QueueGpuZoneText
+{
+    uint64_t text;      // ptr
+    uint16_t size;
+};
+
+struct QueueGpuZoneColor
+{
+    uint32_t thread;
+    uint16_t context;
+    uint8_t b;
+    uint8_t g;
+    uint8_t r;
+};
+
+struct QueueGpuZoneValue
+{
+    uint64_t value;
+    uint32_t thread;
+    uint16_t context;
+};
+
 struct QueueGpuMarkerMetaFat : public QueueGpuMarkerMeta
 {
     uint64_t ptr;
@@ -1006,6 +1039,10 @@ struct QueueItem
         QueueGpuMarkerMeta gpuMarkerMeta;
         QueueGpuMarkerMetaFat gpuMarkerMetaFat;
         QueueGpuZone gpuZone;
+        QueueGpuZoneText gpuZoneText;
+        QueueGpuZoneTextFat gpuZoneTextFat;
+        QueueGpuZoneColor gpuZoneColor;
+        QueueGpuZoneValue gpuZoneValue;
     };
 };
 #pragma pack( pop )
@@ -1079,6 +1116,7 @@ static constexpr size_t QueueDataSize[] = {
     sizeof( QueueHeader ) + sizeof( QueueGpuAnnotationName ),
     sizeof( QueueHeader ) + sizeof( QueueGpuMarkerMeta ),   // GPU marker metadata (fat: carries the string)
     sizeof( QueueHeader ) + sizeof( QueueGpuMarker ),       // GPU marker (fat: carries the srcloc payload)
+    sizeof( QueueHeader ) + sizeof( QueueGpuZoneText ),     // device zone text (fat: carries the string)
     sizeof( QueueHeader ) + sizeof( QueueCallstackFrameSize ),
     sizeof( QueueHeader ) + sizeof( QueueSymbolInformation ),
     sizeof( QueueHeader ),                                  // ExternalNameMetadata - not for wire transfer
@@ -1096,6 +1134,8 @@ static constexpr size_t QueueDataSize[] = {
     sizeof( QueueHeader ) + sizeof( QueueGpuCalibration ),
     sizeof( QueueHeader ) + sizeof( QueueGpuTimeSync ),
     sizeof( QueueHeader ) + sizeof( QueueGpuZone ),
+    sizeof( QueueHeader ) + sizeof( QueueGpuZoneColor ),
+    sizeof( QueueHeader ) + sizeof( QueueGpuZoneValue ),
     sizeof( QueueHeader ),                                  // crash
     sizeof( QueueHeader ) + sizeof( QueueCrashReport ),
     sizeof( QueueHeader ) + sizeof( QueueZoneValidation ),

@@ -353,19 +353,32 @@ void View::DrawFindZoneGpu()
     m_gpuCtxVisible.resize( gpuData.size() );
     for( size_t i=0; i<gpuData.size(); i++ ) m_gpuCtxVisible[i] = !limitCtx || IsGpuCtxVisible( gpuData[i] );
 
-    // A zone is accepted into the search results only when it passes the optional time range
-    // and the optional GPU context filter.
+    // A zone is accepted into the search results only when it passes the optional time range,
+    // the optional GPU context filter and the optional user text filter.
     auto Accept = [this, limitRange, limitCtx, rangeMin, rangeMax]( const GpuZoneRef& ref ) {
         auto& z = *(const GpuEvent*)ref.zone;
         if( limitRange && ( z.GpuStart() < rangeMin || z.GpuEnd() > rangeMax ) ) return false;
         if( limitCtx && !m_gpuCtxVisible[m_gpuZoneIdx.owners[ref.owner].ctx] ) return false;
+        if( m_gpuUserTextFilter.IsActive() )
+        {
+            bool keep = false;
+            if ( m_worker.HasZoneExtra( z ) && m_worker.GetZoneExtra( z ).text.Active() )
+            {
+                auto text = m_worker.GetString( m_worker.GetZoneExtra( z ).text );
+                if( m_gpuUserTextFilter.PassFilter( text ) )
+                {
+                    keep = true;
+                }
+            }
+            if( !keep ) return false;
+        }
         return true;
     };
     auto Timespan = [this]( const GpuZoneRef& ref ) {
         auto& z = *(const GpuEvent*)ref.zone;
         return m_findZoneGpu.selfTime ? GetZoneSelfTime( z ) : z.GpuEnd() - z.GpuStart();
     };
-    const bool filtered = limitRange || limitCtx || m_findZoneGpu.selfTime;
+    const bool filtered = limitRange || limitCtx || m_findZoneGpu.selfTime || m_gpuUserTextFilter.IsActive();
 
     if( ImGui::TreeNodeEx( "Histogram", ImGuiTreeNodeFlags_DefaultOpen ) )
     {
@@ -1169,6 +1182,23 @@ void View::DrawFindZoneGpu()
 
     ImGui::Separator();
 
+    ImGui::AlignTextToFramePadding();
+    TextDisabledUnformatted( "Filter user text:" );
+    ImGui::SameLine();
+    bool filterChanged = m_gpuUserTextFilter.Draw( ICON_FA_FILTER "###resultFilter", 200 );
+
+    ImGui::SameLine();
+    if( ImGui::Button( ICON_FA_DELETE_LEFT " Clear###userText" ) )
+    {
+        m_gpuUserTextFilter.Clear();
+        filterChanged = true;
+    }
+    ImGui::Separator();
+    if( filterChanged )
+    {
+        m_findZoneGpu.ResetMatch();
+    }
+
     ImGui::TextUnformatted( "Found zones:" );
     ImGui::SameLine();
     DrawHelpMarker( "Left click to highlight entry." );
@@ -1189,6 +1219,8 @@ void View::DrawFindZoneGpu()
     groupChanged |= ImGui::RadioButton( "Context", (int*)( &m_findZoneGpu.groupBy ), (int)FindZoneGpu::GroupBy::Context );
     ImGui::SameLine();
     groupChanged |= ImGui::RadioButton( "Thread", (int*)( &m_findZoneGpu.groupBy ), (int)FindZoneGpu::GroupBy::Thread );
+    ImGui::SameLine();
+    groupChanged |= ImGui::RadioButton( "User text", (int*)( &m_findZoneGpu.groupBy ), (int)FindZoneGpu::GroupBy::UserText );
     ImGui::SameLine();
     groupChanged |= ImGui::RadioButton( "No grouping", (int*)( &m_findZoneGpu.groupBy ), (int)FindZoneGpu::GroupBy::NoGrouping );
     if( groupChanged )
@@ -1319,6 +1351,9 @@ void View::DrawFindZoneGpu()
             }
             break;
         }
+        case FindZoneGpu::GroupBy::UserText:
+            hdrString = v->first == std::numeric_limits<uint64_t>::max() ? "No user text" : m_worker.GetString( StringIdx( v->first ) );
+            break;
         case FindZoneGpu::GroupBy::NoGrouping:
             hdrString = "Zone list";
             break;
@@ -1355,6 +1390,13 @@ uint64_t View::GetGpuSelectionTarget( const GpuZoneRef& ev, FindZoneGpu::GroupBy
         return owner.ctx;
     case FindZoneGpu::GroupBy::Thread:
         return owner.tid;
+    case FindZoneGpu::GroupBy::UserText:
+    {
+        const auto& zone = *ev.zone;
+        if( !m_worker.HasZoneExtra( zone ) ) return std::numeric_limits<uint64_t>::max();
+        const auto& extra = m_worker.GetZoneExtra( zone );
+        return extra.text.Active() ? extra.text.Idx() : std::numeric_limits<uint64_t>::max();
+    }
     case FindZoneGpu::GroupBy::NoGrouping:
         return 0;
     default:
