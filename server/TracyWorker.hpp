@@ -639,6 +639,8 @@ public:
 
     tracy_force_inline const bool HasZoneExtra( const ZoneEvent& ev ) const { return ev.extra != 0; }
     tracy_force_inline const ZoneExtra& GetZoneExtra( const ZoneEvent& ev ) const { return m_data.zoneExtra[ev.extra]; }
+    tracy_force_inline const bool HasZoneExtra( const GpuEvent& ev ) const { return ev.extra != 0; }
+    tracy_force_inline const ZoneExtra& GetZoneExtra( const GpuEvent& ev ) const { return m_data.zoneExtra[ev.extra]; }
 
     std::vector<int16_t> GetMatchingSourceLocation( const char* query, bool ignoreCase ) const;
 
@@ -819,6 +821,9 @@ private:
     tracy_force_inline void ProcessGpuMarkerMeta( const QueueGpuMarkerMeta& ev );
     tracy_force_inline void ProcessGpuMarker( const QueueGpuMarker& ev );
     tracy_force_inline void ProcessGpuZone( const QueueGpuZone& ev );
+    tracy_force_inline void ProcessGpuZoneText( const QueueGpuZoneText& ev );
+    tracy_force_inline void ProcessGpuZoneColor( const QueueGpuZoneColor& ev );
+    tracy_force_inline void ProcessGpuZoneValue( const QueueGpuZoneValue& ev );
     tracy_force_inline MemEvent* ProcessMemAlloc( const QueueMemAlloc& ev );
     tracy_force_inline MemEvent* ProcessMemAllocNamed( const QueueMemAlloc& ev );
     tracy_force_inline MemEvent* ProcessMemFree( const QueueMemFree& ev );
@@ -1038,6 +1043,9 @@ private:
     tracy_force_inline ZoneExtra& GetZoneExtraMutable( const ZoneEvent& ev ) { return m_data.zoneExtra[ev.extra]; }
     tracy_force_inline ZoneExtra& AllocZoneExtra( ZoneEvent& ev );
     tracy_force_inline ZoneExtra& RequestZoneExtra( ZoneEvent& ev );
+    ZoneExtra& RequestZoneExtra( GpuEvent& ev );
+    GpuEvent* GetLastGpuZone( uint16_t context, uint32_t thread );
+    void AppendZoneText( ZoneExtra& extra, const char* str, size_t len );
 
     int64_t GetZoneEndImpl( const ZoneEvent& ev ) const;
     int64_t GetZoneEndImpl( const GpuEvent& ev ) const;

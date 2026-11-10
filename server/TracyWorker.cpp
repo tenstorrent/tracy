@@ -4813,6 +4813,15 @@ bool Worker::Process( const QueueItem& ev )
     case QueueType::GpuZone:
         ProcessGpuZone( ev.gpuZone );
         break;
+    case QueueType::GpuZoneText:
+        ProcessGpuZoneText( ev.gpuZoneText );
+        break;
+    case QueueType::GpuZoneColor:
+        ProcessGpuZoneColor( ev.gpuZoneColor );
+        break;
+    case QueueType::GpuZoneValue:
+        ProcessGpuZoneValue( ev.gpuZoneValue );
+        break;
     case QueueType::MemAlloc:
         ProcessMemAlloc( ev.memAlloc );
         break;
@@ -6052,6 +6061,7 @@ void Worker::ProcessGpuZoneBeginImplCommon( GpuEvent* zone, const QueueGpuZoneBe
     zone->callstack.SetVal( 0 );
     zone->SetChild( -1 );
     zone->query_id = ev.queryId;
+    zone->extra = 0;
 
     uint64_t ztid;
     if( ctx->thread == 0 )
@@ -6412,6 +6422,7 @@ void Worker::ProcessGpuZone( const QueueGpuZone& ev )
     zone->callstack.SetVal( 0 );
     zone->SetChild( -1 );
     zone->query_id = 0;
+    zone->extra = 0;
 
     uint64_t ztid;
     if( ctx->thread == 0 )
@@ -6473,6 +6484,64 @@ void Worker::ProcessGpuZone( const QueueGpuZone& ev )
 #endif
 
     if( m_data.lastTime < end ) m_data.lastTime = end;
+}
+
+// The zone most recently sent as a QueueGpuZone for this context and thread, which is the one its text, colour and
+// value items describe.
+GpuEvent* Worker::GetLastGpuZone( uint16_t context, uint32_t thread )
+{
+    auto ctx = m_gpuCtxMap[context];
+    assert( ctx );
+    auto td = ctx->threadData.find( ctx->thread == 0 ? uint64_t( thread ) : 0 );
+    if( td == ctx->threadData.end() || td->second.timeline.empty() ) return nullptr;
+    return td->second.timeline.back();
+}
+
+void Worker::AppendZoneText( ZoneExtra& extra, const char* str, size_t len )
+{
+    if( !extra.text.Active() )
+    {
+        extra.text = StringIdx( StoreString( str, len ).idx );
+        return;
+    }
+    const auto str0 = GetString( extra.text );
+    const auto len0 = strlen( str0 );
+    const auto bsz = len0+len+1;
+    if( m_tmpBufSize < bsz )
+    {
+        delete[] m_tmpBuf;
+        m_tmpBuf = new char[bsz];
+        m_tmpBufSize = bsz;
+    }
+    memcpy( m_tmpBuf, str0, len0 );
+    m_tmpBuf[len0] = '\n';
+    memcpy( m_tmpBuf+len0+1, str, len );
+    extra.text = StringIdx( StoreString( m_tmpBuf, bsz ).idx );
+}
+
+void Worker::ProcessGpuZoneText( const QueueGpuZoneText& ev )
+{
+    const auto str = GetString( StringIdx( GetSingleStringIdx() ) );
+    auto zone = GetLastGpuZone( ev.context, ev.thread );
+    if( !zone ) return;
+    AppendZoneText( RequestZoneExtra( *zone ), str, strlen( str ) );
+}
+
+void Worker::ProcessGpuZoneColor( const QueueGpuZoneColor& ev )
+{
+    auto zone = GetLastGpuZone( ev.context, ev.thread );
+    if( !zone ) return;
+    const uint32_t color = ( ev.b << 16 ) | ( ev.g << 8 ) | ev.r;
+    RequestZoneExtra( *zone ).color = color;
+}
+
+void Worker::ProcessGpuZoneValue( const QueueGpuZoneValue& ev )
+{
+    auto zone = GetLastGpuZone( ev.context, ev.thread );
+    if( !zone ) return;
+    char tmp[64];
+    const auto tsz = sprintf( tmp, "%" PRIu64 " [0x%" PRIx64 "]", ev.value, ev.value );
+    AppendZoneText( RequestZoneExtra( *zone ), tmp, tsz );
 }
 
 static MemEvent* MemDataFree( MemData& memdata, unordered_flat_map<uint64_t, size_t>::iterator it, int64_t time, uint16_t thread )
@@ -8381,6 +8450,7 @@ void Worker::ReadTimeline( FileRead& f, Vector<short_ptr<GpuEvent>>& _vec, uint6
     vec.reserve_exact( size, m_slab );
     auto zone = vec.begin();
     auto end = vec.end();
+    const bool hasExtra = m_traceVersion >= FileVersion( 0, 14, 2 );
     do
     {
         int64_t tcpu, tgpu;
@@ -8403,6 +8473,8 @@ void Worker::ReadTimeline( FileRead& f, Vector<short_ptr<GpuEvent>>& _vec, uint6
         zone->SetCpuEnd( refTime );
         zone->SetGpuEnd( refGpuTime );
         if( hasQueryId ) f.Read( zone->query_id );
+        if( hasExtra ) f.Read( zone->extra );
+        else zone->extra = 0;
     }
     while( ++zone != end );
 }
@@ -9193,6 +9265,7 @@ void Worker::WriteTimelineImpl( FileWrite& f, const V& vec, int64_t& refTime, in
         WriteTimeOffset( f, refTime, v.CpuEnd() );
         WriteTimeOffset( f, refGpuTime, v.GpuEnd() );
         f.Write( &v.query_id, sizeof( v.query_id ) );
+        f.Write( &v.extra, sizeof( v.extra ) );
     }
 }
 
@@ -9255,6 +9328,15 @@ ZoneExtra& Worker::RequestZoneExtra( ZoneEvent& ev )
     {
         return GetZoneExtraMutable( ev );
     }
+}
+
+ZoneExtra& Worker::RequestZoneExtra( GpuEvent& ev )
+{
+    if( ev.extra != 0 ) return m_data.zoneExtra[ev.extra];
+    ev.extra = uint32_t( m_data.zoneExtra.size() );
+    auto& extra = m_data.zoneExtra.push_next();
+    memset( (char*)&extra, 0, sizeof( extra ) );
+    return extra;
 }
 
 void Worker::CacheSource( const StringRef& str, const StringIdx& image )

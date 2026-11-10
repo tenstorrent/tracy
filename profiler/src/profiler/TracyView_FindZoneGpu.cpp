@@ -1190,6 +1190,8 @@ void View::DrawFindZoneGpu()
     ImGui::SameLine();
     groupChanged |= ImGui::RadioButton( "Thread", (int*)( &m_findZoneGpu.groupBy ), (int)FindZoneGpu::GroupBy::Thread );
     ImGui::SameLine();
+    groupChanged |= ImGui::RadioButton( "User text", (int*)( &m_findZoneGpu.groupBy ), (int)FindZoneGpu::GroupBy::UserText );
+    ImGui::SameLine();
     groupChanged |= ImGui::RadioButton( "No grouping", (int*)( &m_findZoneGpu.groupBy ), (int)FindZoneGpu::GroupBy::NoGrouping );
     if( groupChanged )
     {
@@ -1319,6 +1321,9 @@ void View::DrawFindZoneGpu()
             }
             break;
         }
+        case FindZoneGpu::GroupBy::UserText:
+            hdrString = v->first == std::numeric_limits<uint64_t>::max() ? "No user text" : m_worker.GetString( StringIdx( v->first ) );
+            break;
         case FindZoneGpu::GroupBy::NoGrouping:
             hdrString = "Zone list";
             break;
@@ -1355,6 +1360,13 @@ uint64_t View::GetGpuSelectionTarget( const GpuZoneRef& ev, FindZoneGpu::GroupBy
         return owner.ctx;
     case FindZoneGpu::GroupBy::Thread:
         return owner.tid;
+    case FindZoneGpu::GroupBy::UserText:
+    {
+        const auto& zone = *ev.zone;
+        if( !m_worker.HasZoneExtra( zone ) ) return std::numeric_limits<uint64_t>::max();
+        const auto& extra = m_worker.GetZoneExtra( zone );
+        return extra.text.Active() ? extra.text.Idx() : std::numeric_limits<uint64_t>::max();
+    }
     case FindZoneGpu::GroupBy::NoGrouping:
         return 0;
     default:

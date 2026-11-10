@@ -405,6 +405,7 @@ struct GpuEvent
     uint64_t _gpuEnd_child2;
     Int24 callstack;
     uint16_t query_id;
+    uint32_t extra;
 };
 
 static_assert( std::is_standard_layout<GpuEvent>::value, "GpuEvent is not standard layout" );

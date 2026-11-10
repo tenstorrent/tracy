@@ -392,7 +392,7 @@ int main(int argc, char** argv)
         }
 
         std::vector<const char*> columns;
-        columns = {"name", "src_file", "Time from start of program", "GPU execution time"};
+        columns = {"name", "src_file", "Time from start of program", "GPU execution time", "zone_text"};
 
         std::string header = join(columns, args.separator);
         printf("%s\n", header.data());
@@ -417,6 +417,16 @@ int main(int argc, char** argv)
 
                 auto timespan = end - start;
                 values[3] = std::to_string( timespan );
+
+                values[4].clear();
+                if (worker.HasZoneExtra(*gpu_event))
+                {
+                    const auto& text = worker.GetZoneExtra(*gpu_event).text;
+                    if (text.Active())
+                    {
+                        values[4] = "\"" + (std::string)worker.GetString(text) + "\"";
+                    }
+                }
 
                 std::string row = join( values, args.separator );
                 printf( "%s\n", row.data() );
@@ -626,6 +636,16 @@ int main(int argc, char** argv)
             for (const auto& zone_thread_data : zone_data.zones) {
                 const auto zone_event = zone_thread_data.Zone();
                 const auto tId = zone_thread_data.Thread();
+
+                values[4].clear();
+                if (worker.HasZoneExtra(*zone_event))
+                {
+                    const auto& text = worker.GetZoneExtra(*zone_event).text;
+                    if (text.Active())
+                    {
+                        values[4] = "\"" + (std::string)worker.GetString(text) + "\"";
+                    }
+                }
 
                 const auto start = zone_event->GpuStart();
                 const auto end = zone_event->GpuEnd();

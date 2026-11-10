@@ -2472,6 +2472,10 @@ static void FreeAssociatedMemory( const QueueItem& item )
         ptr = MemRead<uint64_t>( &item.gpuMarkerMetaFat.ptr );
         tracy_free( (void*)ptr );
         break;
+    case QueueType::GpuZoneText:
+        ptr = MemRead<uint64_t>( &item.gpuZoneTextFat.text );
+        tracy_free( (void*)ptr );
+        break;
     case QueueType::CallstackSerial:
     case QueueType::Callstack:
         ptr = MemRead( &item.callstackFat.ptr );
@@ -2840,6 +2844,12 @@ Profiler::DequeueStatus Profiler::Dequeue( moodycamel::ConsumerToken& token )
                     case QueueType::GpuMarkerMeta:
                         ptr = MemRead<uint64_t>( &item->gpuMarkerMetaFat.ptr );
                         size = MemRead<uint16_t>( &item->gpuMarkerMetaFat.size );
+                        SendSingleString( (const char*)ptr, size );
+                        tracy_free_fast( (void*)ptr );
+                        break;
+                    case QueueType::GpuZoneText:
+                        ptr = MemRead<uint64_t>( &item->gpuZoneTextFat.text );
+                        size = MemRead<uint16_t>( &item->gpuZoneTextFat.size );
                         SendSingleString( (const char*)ptr, size );
                         tracy_free_fast( (void*)ptr );
                         break;
@@ -3256,6 +3266,14 @@ Profiler::DequeueStatus Profiler::DequeueSerial()
                 {
                     ptr = MemRead<uint64_t>( &item->gpuMarkerMetaFat.ptr );
                     uint16_t size = MemRead<uint16_t>( &item->gpuMarkerMetaFat.size );
+                    SendSingleString( (const char*)ptr, size );
+                    tracy_free_fast( (void*)ptr );
+                    break;
+                }
+                case QueueType::GpuZoneText:
+                {
+                    ptr = MemRead<uint64_t>( &item->gpuZoneTextFat.text );
+                    uint16_t size = MemRead<uint16_t>( &item->gpuZoneTextFat.size );
                     SendSingleString( (const char*)ptr, size );
                     tracy_free_fast( (void*)ptr );
                     break;
