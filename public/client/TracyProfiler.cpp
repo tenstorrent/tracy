@@ -3270,14 +3270,6 @@ Profiler::DequeueStatus Profiler::DequeueSerial()
                     tracy_free_fast( (void*)ptr );
                     break;
                 }
-                case QueueType::GpuZoneText:
-                {
-                    ptr = MemRead<uint64_t>( &item->gpuZoneTextFat.text );
-                    uint16_t size = MemRead<uint16_t>( &item->gpuZoneTextFat.size );
-                    SendSingleString( (const char*)ptr, size );
-                    tracy_free_fast( (void*)ptr );
-                    break;
-                }
                 case QueueType::GpuMarker:
                 {
                     int64_t t = MemRead<int64_t>( &item->gpuMarker.gpuTime );
