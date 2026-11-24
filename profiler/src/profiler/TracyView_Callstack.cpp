@@ -53,6 +53,14 @@ void View::DrawCallstackTable( uint32_t callstack, const CallstackTableParams& p
     } );
 }
 
+// Moves the write position past what snprintf() produced, never beyond the last byte before the
+// terminator, so a truncated result cannot push later writes out of the buffer.
+static char* Advance( char* ptr, char* end, int n )
+{
+    if( n <= 0 ) return ptr;
+    return ptr + std::min<ptrdiff_t>( n, end - ptr - 1 );
+}
+
 void View::DrawCallstackTable( const CallstackFrameId* data, size_t size, const CallstackTableParams& params )
 {
     if( ClipboardButton() )
@@ -71,6 +79,7 @@ void View::DrawCallstackTable( const CallstackFrameId* data, size_t size, const 
             else
             {
                 auto ptr = buf;
+                char* const bufEnd = buf + sizeof( buf );
                 const auto fsz = frameData->size;
                 for( uint8_t f=0; f<fsz; f++ )
                 {
@@ -101,7 +110,7 @@ void View::DrawCallstackTable( const CallstackFrameId* data, size_t size, const 
                     {
                         ptr += sprintf( ptr, "inl. " );
                     }
-                    ptr += sprintf( ptr, "%s  ", txt );
+                    ptr = Advance( ptr, bufEnd, snprintf( ptr, bufEnd - ptr, "%s  ", txt ) );
                     txt = m_worker.GetString( frame.file );
                     if( frame.line == 0 )
                     {
