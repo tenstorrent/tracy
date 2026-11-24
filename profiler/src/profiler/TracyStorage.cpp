@@ -251,7 +251,7 @@ const char* GetSavePath( const char* program, uint64_t time, bool create )
     {
         snprintf( tmp, sizeof( tmp ), "%" PRIu64, time );
     }
-    sz += sprintf( buf+sz, "/%s.json", tmp );
+    sz = Advance( sz, MaxPath, snprintf( buf+sz, MaxPath - sz, "/%s.json", tmp ) );
 
     return buf;
 }
