@@ -38,7 +38,7 @@ const char* TimelineItemGpu::HeaderLabel() const
     }
     else
     {
-        sprintf( buf, "%s context %i", GpuContextNames[(int)m_gpu->type], m_idx );
+        snprintf( buf, sizeof( buf ), "%s context %i", GpuContextNames[(int)m_gpu->type], m_idx );
     }
     return buf;
 }
