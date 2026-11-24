@@ -984,7 +984,7 @@ const char* View::GetFrameText( const FrameData& fd, int i, uint64_t ftime ) con
     }
     else
     {
-        sprintf( buf, "%s %s (%s)", GetFrameSetName( fd ), RealToString( fnum ), TimeToString( ftime ) );
+        snprintf( buf, sizeof( buf ), "%s %s (%s)", GetFrameSetName( fd ), RealToString( fnum ), TimeToString( ftime ) );
     }
     return buf;
 }
