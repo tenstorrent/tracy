@@ -732,7 +732,7 @@ bool View::DrawImpl()
     {
         bool keepOpen = true;
         char tmp[2048];
-        sprintf( tmp, "%s###Connection", m_worker.GetAddr().c_str() );
+        snprintf( tmp, sizeof( tmp ), "%s###Connection", m_worker.GetAddr().c_str() );
         ImGui::Begin( tmp, &keepOpen, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse );
         ImGui::PushFont( g_fonts.normal, FontNormal * 2.f );
         ImGui::Spacing();
