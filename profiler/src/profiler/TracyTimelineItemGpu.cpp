@@ -53,7 +53,7 @@ void TimelineItemGpu::HeaderTooltip( const char* label ) const
         ( m_gpu->type == GpuContextType::Metal );
 
     char buf[64];
-    sprintf( buf, "%s context %i", GpuContextNames[(int)m_gpu->type], m_idx );
+    snprintf( buf, sizeof( buf ), "%s context %i", GpuContextNames[(int)m_gpu->type], m_idx );
 
     ImGui::BeginTooltip();
     if( m_gpu->name.Active() ) TextFocused( "Name:", m_worker.GetString( m_gpu->name ) );
