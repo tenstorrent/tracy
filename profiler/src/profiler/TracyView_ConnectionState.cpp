@@ -111,7 +111,7 @@ bool View::DrawConnection()
             if( sz < 7 || memcmp( fn + sz - 6, ".tracy", 6 ) != 0 )
             {
                 char tmp[1024];
-                sprintf( tmp, "%s.tracy", fn );
+                snprintf( tmp, sizeof( tmp ), "%s.tracy", fn );
                 m_filenameStaging = tmp;
             }
             else
