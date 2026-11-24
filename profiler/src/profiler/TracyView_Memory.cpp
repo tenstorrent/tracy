@@ -539,7 +539,7 @@ void View::DrawMemoryAllocWindow()
             TextFocused( ICON_FA_BOX_ARCHIVE " Pool:", m_memoryAllocInfoPool == 0 ? "Default allocator" : m_worker.GetString( m_memoryAllocInfoPool ) );
         }
         char buf[64];
-        sprintf( buf, "0x%" PRIx64, ev.Ptr() );
+        snprintf( buf, sizeof( buf ), "0x%" PRIx64, ev.Ptr() );
         TextFocused( "Address:", buf );
         TextFocused( "Size:", MemSizeToString( ev.Size() ) );
         if( ev.Size() >= 10000ll )
