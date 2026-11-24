@@ -62,7 +62,7 @@ static const char* GetOsInfo()
 #  if defined __ANDROID__
     snprintf( buf, sizeof( buf ), "Linux %s (Android)", utsName.release );
 #  else
-    sprintf( buf, "Linux %s", utsName.release );
+    snprintf( buf, sizeof( buf ), "Linux %s", utsName.release );
 #  endif
 #elif defined __APPLE__
 #  if TARGET_OS_IPHONE == 1
