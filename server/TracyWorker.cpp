@@ -5269,11 +5269,11 @@ void Worker::ZoneValueFailure( uint64_t thread, uint64_t value )
     char buf[128];
     if( (int64_t)value < 0 )
     {
-        sprintf( buf, "Zone value was: %" PRIu64 " (unsigned), %" PRIi64 " (signed)", value, (int64_t)value );
+        snprintf( buf, sizeof( buf ), "Zone value was: %" PRIu64 " (unsigned), %" PRIi64 " (signed)", value, (int64_t)value );
     }
     else
     {
-        sprintf( buf, "Zone value was: %" PRIu64, value );
+        snprintf( buf, sizeof( buf ), "Zone value was: %" PRIu64, value );
     }
 
     m_failure = Failure::ZoneValue;
@@ -5608,7 +5608,7 @@ void Worker::ProcessZoneColor( const QueueZoneColor& ev )
 void Worker::ProcessZoneValue( const QueueZoneValue& ev )
 {
     char tmp[64];
-    const auto tsz = sprintf( tmp, "%" PRIu64 " [0x%" PRIx64 "]", ev.value, ev.value );
+    const auto tsz = snprintf( tmp, sizeof( tmp ), "%" PRIu64 " [0x%" PRIx64 "]", ev.value, ev.value );
 
     auto td = RetrieveThread( m_threadCtx, m_data.threadDataLast );
     if( !td )
