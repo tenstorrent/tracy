@@ -770,7 +770,7 @@ bool View::DrawImpl()
         const auto dst = m_dstFileBytes.load( std::memory_order_relaxed );
         m_notificationTime = 4;
         char buf[1024];
-        sprintf( buf, "Trace size %s (%.2f%% ratio)", MemSizeToString( dst ), 100.f * dst / src );
+        snprintf( buf, sizeof( buf ), "Trace size %s (%.2f%% ratio)", MemSizeToString( dst ), 100.f * dst / src );
         m_notificationText = buf;
         m_acb();
     }
