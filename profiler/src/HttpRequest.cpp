@@ -60,7 +60,7 @@ static const char* GetOsInfo()
     struct utsname utsName;
     uname( &utsName );
 #  if defined __ANDROID__
-    sprintf( buf, "Linux %s (Android)", utsName.release );
+    snprintf( buf, sizeof( buf ), "Linux %s (Android)", utsName.release );
 #  else
     sprintf( buf, "Linux %s", utsName.release );
 #  endif
