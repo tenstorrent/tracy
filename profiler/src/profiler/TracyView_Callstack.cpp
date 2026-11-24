@@ -122,7 +122,7 @@ void View::DrawCallstackTable( const CallstackFrameId* data, size_t size, const 
                     }
                     if( frameData->imageName.Active() )
                     {
-                        ptr += sprintf( ptr, " %s\n", m_worker.GetString( frameData->imageName ) );
+                        ptr = Advance( ptr, bufEnd, snprintf( ptr, bufEnd - ptr, " %s\n", m_worker.GetString( frameData->imageName ) ) );
                     }
                     else
                     {
