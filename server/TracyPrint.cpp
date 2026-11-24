@@ -442,7 +442,7 @@ const char* LocationToString( const char* fn, uint32_t line )
     char* buf = bufpool[bufsel];
     bufsel = ( bufsel + 1 ) % Pool;
 
-    sprintf( buf, "%s:%i", fn, line );
+    snprintf( buf, sizeof( bufpool[0] ), "%s:%i", fn, line );
     return buf;
 }
 
