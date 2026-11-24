@@ -979,7 +979,7 @@ const char* View::GetFrameText( const FrameData& fd, int i, uint64_t ftime ) con
         }
         else
         {
-            sprintf( buf, "Missed frames (%s)", TimeToString( ftime ) );
+            snprintf( buf, sizeof( buf ), "Missed frames (%s)", TimeToString( ftime ) );
         }
     }
     else
