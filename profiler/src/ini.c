@@ -266,7 +266,9 @@ int ini_sget(
     return 0;
   }
   if (scanfmt) {
-    sscanf(val, scanfmt, dst);
+    if (sscanf(val, scanfmt, dst) != 1) {
+      return 0;
+    }
   } else {
     *((const char**) dst) = val;
   }
