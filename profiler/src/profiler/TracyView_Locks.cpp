@@ -25,7 +25,7 @@ void View::DrawLockHeader( uint32_t id, const LockMap& lockmap, const SourceLoca
     }
     else
     {
-        sprintf( buf, "%" PRIu32 ": %s", id, m_worker.GetString( srcloc.function ) );
+        snprintf( buf, sizeof( buf ), "%" PRIu32 ": %s", id, m_worker.GetString( srcloc.function ) );
     }
     ImGui::PushFont( g_fonts.normal, FontSmall );
     DrawTextContrast( draw, wpos + ImVec2( 0, offset ), 0xFF8888FF, buf );
