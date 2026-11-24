@@ -92,33 +92,17 @@ public:
         }
         out.push_back( '"' );
 #else
+        // Single quotes: the shell expands nothing inside them (no $(...), backticks, $var), unlike
+        // double quotes. The image path comes from the trace file, so it must be treated as untrusted.
+        // A literal single quote is written as '\'' (close, escaped quote, reopen).
         out.reserve( s.size() + 2 );
-        out.push_back( '"' );
-        for( unsigned char c : s )
+        out.push_back( '\'' );
+        for( char c : s )
         {
-            if( ' ' <= c and c <= '~' and c != '\\' and c != '"' )
-            {
-                out.push_back( c );
-            }
-            else
-            {
-                out.push_back( '\\' );
-                switch( c )
-                {
-                    case '"':  out.push_back( '"' );  break;
-                    case '\\': out.push_back( '\\' ); break;
-                    case '\t': out.push_back( 't' );  break;
-                    case '\r': out.push_back( 'r' );  break;
-                    case '\n': out.push_back( 'n' );  break;
-                    default:
-                        char const* const hexdig = "0123456789ABCDEF";
-                        out.push_back( 'x' );
-                        out.push_back( hexdig[c >> 4] );
-                        out.push_back( hexdig[c & 0xF] );
-                }
-            }
+            if( c == '\'' ) out.append( "'\\''" );
+            else out.push_back( c );
         }
-        out.push_back( '"' );
+        out.push_back( '\'' );
 #endif
     }
 
