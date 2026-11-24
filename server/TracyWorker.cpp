@@ -515,11 +515,11 @@ Worker::Worker( const char* name, const char* program, const std::vector<ImportE
             int len;
             if( t.first <= std::numeric_limits<uint32_t>::max() )
             {
-                len = sprintf( buf, "%" PRIu64, t.first );
+                len = snprintf( buf, sizeof( buf ), "%" PRIu64, t.first );
             }
             else
             {
-                len = sprintf( buf, "PID %" PRIu64 " TID %" PRIu64, t.first >> 32, t.first & 0xFFFFFFFF );
+                len = snprintf( buf, sizeof( buf ), "PID %" PRIu64 " TID %" PRIu64, t.first >> 32, t.first & 0xFFFFFFFF );
             }
             AddThreadString( t.first, buf, len );
         }
