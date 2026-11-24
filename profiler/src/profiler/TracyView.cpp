@@ -836,7 +836,7 @@ bool View::DrawImpl()
     }
 #else
     char tmp[2048];
-    sprintf( tmp, "%s###Profiler", m_worker.GetCaptureName().c_str() );
+    snprintf( tmp, sizeof( tmp ), "%s###Profiler", m_worker.GetCaptureName().c_str() );
     ImGui::SetNextWindowSize( ImVec2( 1550, 800 ), ImGuiCond_FirstUseEver );
     ImGui::Begin( tmp, keepOpenPtr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoBringToFrontOnFocus );
     ImGuiViewport* viewport = ImGui::GetMainViewport();
