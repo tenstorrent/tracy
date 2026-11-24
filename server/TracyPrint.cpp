@@ -368,7 +368,7 @@ const char* MemSizeToString( int64_t val )
 
     if( aval < 10000ll )
     {
-        sprintf( buf, "%" PRIi64 " bytes", val );
+        snprintf( buf, sizeof( bufpool[0] ), "%" PRIi64 " bytes", val );
         return buf;
     }
 
