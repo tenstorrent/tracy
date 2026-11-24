@@ -2268,7 +2268,7 @@ uint64_t SourceView::RenderSymbolAsmView( const AddrStatData& as, Worker& worker
         snprintf( tmp, sizeof( tmp ), "%" PRIx64, m_baseAddr + m_codeLen );
         maxAddrLen = strlen( tmp );
         sprintf( tmp, "%zu", m_asm.size() );
-        sprintf( tmp2, "+%" PRIu32, m_codeLen );
+        snprintf( tmp2, sizeof( tmp2 ), "+%" PRIu32, m_codeLen );
         maxAddrLenRel = std::max( strlen( tmp ) + 3, strlen( tmp2 ) );      // +3: [-123]
     }
 
