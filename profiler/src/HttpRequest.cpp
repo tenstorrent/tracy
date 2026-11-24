@@ -106,7 +106,7 @@ void HttpRequest( const char* server, const char* resource, int port, const std:
         std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
     }
     char request[4096];
-    const auto len = sprintf( request, "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: Tracy Profiler %i.%i.%i (%s) [%s]\r\nConnection: close\r\nCache-Control: no-cache, no-store, must-revalidate\r\n\r\n", resource, server, tracy::Version::Major, tracy::Version::Minor, tracy::Version::Patch, GetOsInfo(), tracy::GitRef );
+    const auto len = snprintf( request, sizeof( request ), "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: Tracy Profiler %i.%i.%i (%s) [%s]\r\nConnection: close\r\nCache-Control: no-cache, no-store, must-revalidate\r\n\r\n", resource, server, tracy::Version::Major, tracy::Version::Minor, tracy::Version::Patch, GetOsInfo(), tracy::GitRef );
     sock.Send( request, len );
     char response[4096];
     const auto sz = sock.ReadUpTo( response, 4096, 15, [] { return s_abort.load( std::memory_order_relaxed ); } );
