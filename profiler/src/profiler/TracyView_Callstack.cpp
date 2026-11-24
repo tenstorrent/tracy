@@ -114,7 +114,7 @@ void View::DrawCallstackTable( const CallstackFrameId* data, size_t size, const 
                     txt = m_worker.GetString( frame.file );
                     if( frame.line == 0 )
                     {
-                        ptr += sprintf( ptr, "(%s)", txt );
+                        ptr = Advance( ptr, bufEnd, snprintf( ptr, bufEnd - ptr, "(%s)", txt ) );
                     }
                     else
                     {
