@@ -305,13 +305,13 @@ void View::DrawInfo()
                     int ll = cpl;
                     for( auto& core : csort )
                     {
-                        sprintf( buf, ICON_FA_MICROCHIP "%" PRIu32, core->first );
+                        snprintf( buf, sizeof( buf ), ICON_FA_MICROCHIP "%" PRIu32, core->first );
                         draw->AddText( cpos, 0xFFFFFFFF, buf );
                         draw->AddRect( cpos + ImVec2( 0, ty ), cpos + ImVec2( inCoreWidth + small, inCoreHeight + small ), 0xFFFFFFFF );
 
                         for( int i=0; i<core->second.size(); i++ )
                         {
-                            sprintf( buf, ICON_FA_SHUFFLE "%" PRIu32, core->second[i] );
+                            snprintf( buf, sizeof( buf ), ICON_FA_SHUFFLE "%" PRIu32, core->second[i] );
                             draw->AddText( cpos + ImVec2( margin + i * ( margin + ttsz ), ty + small ), 0xFFFFFFFF, buf );
                         }
 
