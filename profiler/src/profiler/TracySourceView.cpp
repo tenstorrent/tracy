@@ -726,7 +726,7 @@ void SourceView::RenderSymbolView( Worker& worker, View& view, WindowConstraints
         else
         {
             char tmp[32];
-            sprintf( tmp, "0x%" PRIx64, m_baseAddr );
+            snprintf( tmp, sizeof( tmp ), "0x%" PRIx64, m_baseAddr );
             TextFocused( ICON_FA_PUZZLE_PIECE " Symbol:", tmp );
         }
     }
@@ -2074,7 +2074,7 @@ void SourceView::AttachRangeToLlm( size_t start, size_t stop, Worker& worker, Vi
         else
         {
             char tmp[32];
-            sprintf( tmp, "0x%" PRIx64, m_baseAddr );
+            snprintf( tmp, sizeof( tmp ), "0x%" PRIx64, m_baseAddr );
             symName = tmp;
         }
     }
@@ -2107,7 +2107,7 @@ void SourceView::AttachRangeToLlm( size_t start, size_t stop, Worker& worker, Vi
     }
 
     char tmp[32];
-    sprintf( tmp, "0x%" PRIx64, m_baseAddr );
+    snprintf( tmp, sizeof( tmp ), "0x%" PRIx64, m_baseAddr );
 
     nlohmann::json json = {
         { "type", "assembly" },
@@ -2265,7 +2265,7 @@ uint64_t SourceView::RenderSymbolAsmView( const AddrStatData& as, Worker& worker
     int maxAddrLenRel;
     {
         char tmp[32], tmp2[32];
-        sprintf( tmp, "%" PRIx64, m_baseAddr + m_codeLen );
+        snprintf( tmp, sizeof( tmp ), "%" PRIx64, m_baseAddr + m_codeLen );
         maxAddrLen = strlen( tmp );
         sprintf( tmp, "%zu", m_asm.size() );
         sprintf( tmp2, "+%" PRIu32, m_codeLen );
@@ -2361,14 +2361,14 @@ uint64_t SourceView::RenderSymbolAsmView( const AddrStatData& as, Worker& worker
                         UnsetFont();
                         ImGui::BeginTooltip();
                         char tmp[32];
-                        sprintf( tmp, "+%" PRIu64, v.first - m_baseAddr );
+                        snprintf( tmp, sizeof( tmp ), "+%" PRIu64, v.first - m_baseAddr );
                         TextFocused( "Jump target:", tmp );
                         ImGui::SameLine();
-                        sprintf( tmp, "(0x%" PRIx64 ")", v.first );
+                        snprintf( tmp, sizeof( tmp ), "(0x%" PRIx64 ")", v.first );
                         TextDisabledUnformatted( tmp );
                         auto lit = m_locMap.find( v.first );
                         assert( lit != m_locMap.end() );
-                        sprintf( tmp, ".L%" PRIu32, lit->second );
+                        snprintf( tmp, sizeof( tmp ), ".L%" PRIu32, lit->second );
                         TextFocused( "Jump label:", tmp );
                         uint32_t srcline;
                         const auto srcidx = worker.GetLocationForAddress( v.first, srcline );
@@ -2525,7 +2525,7 @@ uint64_t SourceView::RenderSymbolAsmView( const AddrStatData& as, Worker& worker
                         SmallColorBox( 0 );
                         ImGui::SameLine();
                         char buf[32];
-                        sprintf( buf, "0x%" PRIx64, src );
+                        snprintf( buf, sizeof( buf ), "0x%" PRIx64, src );
                         if( ImGui::MenuItem( buf ) )
                         {
                             m_targetAddr = src;
@@ -3258,7 +3258,7 @@ void SourceView::RenderLine( const Tokenizer::Line& line, int lineNum, const Add
         const auto maxAsm = strlen( buf ) + 1;
         if( match > 0 )
         {
-            sprintf( buf, "@%" PRIu32, match );
+            snprintf( buf, sizeof( buf ), "@%" PRIu32, match );
             const auto asmsz = strlen( buf );
             TextDisabledUnformatted( buf );
             ImGui::SameLine( 0, 0 );
@@ -3600,11 +3600,11 @@ void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const Addr
     }
     else if( m_asmRelative )
     {
-        sprintf( buf, "+%" PRIu64, line.addr - m_baseAddr );
+        snprintf( buf, sizeof( buf ), "+%" PRIu64, line.addr - m_baseAddr );
     }
     else
     {
-        sprintf( buf, "%" PRIx64, line.addr );
+        snprintf( buf, sizeof( buf ), "%" PRIx64, line.addr );
     }
     const auto asz = strlen( buf );
     if( m_asmRelative )
@@ -4392,7 +4392,7 @@ void SourceView::RenderAsmLine( AsmLine& line, const AddrStat& ipcnt, const Addr
                     ImGui::TextUnformatted( jumpName );
                 }
                 char tmp[32];
-                sprintf( tmp, "+%" PRIu32, jumpOffset );
+                snprintf( tmp, sizeof( tmp ), "+%" PRIu32, jumpOffset );
                 TextFocused( "Jump target:", tmp );
                 uint32_t srcline;
                 const auto srcidx = worker.GetLocationForAddress( line.jumpAddr, srcline );
@@ -5267,7 +5267,7 @@ void SourceView::Save( const Worker& worker, size_t start, size_t stop )
             }
             else
             {
-                sprintf( tmp, "0x%" PRIx64, m_baseAddr );
+                snprintf( tmp, sizeof( tmp ), "0x%" PRIx64, m_baseAddr );
                 symName = tmp;
             }
         }
