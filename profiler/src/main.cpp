@@ -149,7 +149,7 @@ static float smoothstep( float x )
 static void SetWindowTitleCallback( const char* title )
 {
     char tmp[1024];
-    sprintf( tmp, "%s - Tracy Profiler %i.%i.%i", title, tracy::Version::Major, tracy::Version::Minor, tracy::Version::Patch );
+    snprintf( tmp, sizeof( tmp ), "%s - Tracy Profiler %i.%i.%i", title, tracy::Version::Major, tracy::Version::Minor, tracy::Version::Patch );
     bptr->SetTitle( tmp );
     s_customTitle = true;
 }
