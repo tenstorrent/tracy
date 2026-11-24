@@ -513,7 +513,7 @@ DisasmData Disassemble( uint64_t symAddr, const Worker& worker )
                 if( sit == data.sourceFiles.end() ) data.sourceFiles.emplace( idx, srcline );
             }
             char tmp[16];
-            sprintf( tmp, "%" PRIu32, mLineMax );
+            snprintf( tmp, sizeof( tmp ), "%" PRIu32, mLineMax );
             data.maxLine = std::max( data.maxLine, strlen( tmp ) + 1 );
         }
         cs_free( insn, cnt );
@@ -734,7 +734,7 @@ nlohmann::json JsonDisassembly( uint64_t symAddr, Worker& worker, const View& vi
     GatherAdditionalIpStats( symAddr, as, worker, false, view, nullptr, false );
 
     char tmp[32];
-    sprintf( tmp, "0x%" PRIx64, symAddr );
+    snprintf( tmp, sizeof( tmp ), "0x%" PRIx64, symAddr );
 
     nlohmann::json json = {
         { "address", tmp },
