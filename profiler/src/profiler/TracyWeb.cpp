@@ -4,8 +4,6 @@
 #elif defined __EMSCRIPTEN__
 #  include <emscripten.h>
 #else
-#  include <stdio.h>
-#  include <stdlib.h>
 #  include <spawn.h>
 #  include <sys/wait.h>
 #  include <unistd.h>
@@ -47,9 +45,7 @@ void OpenWebpage( const char* url )
 #elif defined __EMSCRIPTEN__
     EM_ASM( { window.open( UTF8ToString( $0 ), '_blank' ) }, url );
 #else
-    char buf[1024];
-    sprintf( buf, "xdg-open %s", url );
-    system( buf );
+    Launch( "xdg-open", url );
 #endif
 }
 
