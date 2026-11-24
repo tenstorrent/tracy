@@ -852,7 +852,7 @@ Worker::Worker( FileRead& f, EventType::Type eventMask, bool bgTasks, bool allow
     {
         s_loadProgress.total.store( 0, std::memory_order_relaxed );
         char buf[256];
-        sprintf( buf, "Too many dynamic source locations (%s)", RealToString( sz ) );
+        snprintf( buf, sizeof( buf ), "Too many dynamic source locations (%s)", RealToString( sz ) );
         throw LoadFailure( buf );
     }
     m_data.sourceLocationPayload.reserve_exact( sz, m_slab );
