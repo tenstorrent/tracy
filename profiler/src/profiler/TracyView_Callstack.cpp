@@ -104,11 +104,11 @@ void View::DrawCallstackTable( const CallstackFrameId* data, size_t size, const 
 
                     if( f == fsz-1 )
                     {
-                        ptr += sprintf( ptr, "%3i. ", fidx++ );
+                        ptr = Advance( ptr, bufEnd, snprintf( ptr, bufEnd - ptr, "%3i. ", fidx++ ) );
                     }
                     else
                     {
-                        ptr += sprintf( ptr, "inl. " );
+                        ptr = Advance( ptr, bufEnd, snprintf( ptr, bufEnd - ptr, "inl. " ) );
                     }
                     ptr = Advance( ptr, bufEnd, snprintf( ptr, bufEnd - ptr, "%s  ", txt ) );
                     txt = m_worker.GetString( frame.file );
@@ -126,7 +126,7 @@ void View::DrawCallstackTable( const CallstackFrameId* data, size_t size, const 
                     }
                     else
                     {
-                        ptr += sprintf( ptr, "\n" );
+                        ptr = Advance( ptr, bufEnd, snprintf( ptr, bufEnd - ptr, "\n" ) );
                     }
                 }
             }
