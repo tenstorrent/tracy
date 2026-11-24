@@ -971,7 +971,7 @@ const char* View::GetFrameText( const FrameData& fd, int i, uint64_t ftime ) con
     {
         if( i == 0 )
         {
-            sprintf( buf, "Tracy init (%s)", TimeToString( ftime ) );
+            snprintf( buf, sizeof( buf ), "Tracy init (%s)", TimeToString( ftime ) );
         }
         else if( i != 1 || !m_worker.IsOnDemand() )
         {
