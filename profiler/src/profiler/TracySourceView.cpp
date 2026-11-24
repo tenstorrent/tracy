@@ -5246,7 +5246,7 @@ void SourceView::Save( const Worker& worker, size_t start, size_t stop )
         if( sz < 5 || memcmp( fn + sz - 4, ".asm", 4 ) != 0 )
         {
             char tmp[1024];
-            sprintf( tmp, "%s.asm", fn );
+            snprintf( tmp, sizeof( tmp ), "%s.asm", fn );
             f = fopen( tmp, "wb" );
         }
         else
