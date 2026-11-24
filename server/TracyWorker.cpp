@@ -2903,7 +2903,7 @@ void Worker::Exec()
         auto lt = localtime( &date );
         strftime( dtmp, 64, "%F %T", lt );
         char tmp[1024];
-        sprintf( tmp, "%s @ %s", welcome.programName, dtmp );
+        snprintf( tmp, sizeof( tmp ), "%s @ %s", welcome.programName, dtmp );
         m_captureName = tmp;
 
         m_hostInfo = welcome.hostInfo;
