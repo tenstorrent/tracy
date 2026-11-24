@@ -21,7 +21,7 @@ void View::DrawLockHeader( uint32_t id, const LockMap& lockmap, const SourceLoca
     char buf[1024];
     if( lockmap.customName.Active() )
     {
-        sprintf( buf, "%" PRIu32 ": %s", id, m_worker.GetString( lockmap.customName ) );
+        snprintf( buf, sizeof( buf ), "%" PRIu32 ": %s", id, m_worker.GetString( lockmap.customName ) );
     }
     else
     {
