@@ -118,7 +118,7 @@ void View::DrawCallstackTable( const CallstackFrameId* data, size_t size, const 
                     }
                     else
                     {
-                        ptr += sprintf( ptr, "(%s:%" PRIu32 ")", txt, frame.line );
+                        ptr = Advance( ptr, bufEnd, snprintf( ptr, bufEnd - ptr, "(%s:%" PRIu32 ")", txt, frame.line ) );
                     }
                     if( frameData->imageName.Active() )
                     {
