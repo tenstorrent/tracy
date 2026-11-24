@@ -62,7 +62,7 @@ void View::DrawTimelineFramesHeader()
             auto txt = TimeToStringExact( m_vd.zvStart );
             if( m_vd.zvStart >= 0 )
             {
-                sprintf( buf, "+%s", txt );
+                snprintf( buf, sizeof( buf ), "+%s", txt );
                 txt = buf;
             }
             draw->AddText( wpos + ImVec2( x, ty05 ), 0x66FFFFFF, txt );
