@@ -1008,7 +1008,7 @@ const char* View::GetFrameSetName( const FrameData& fd, const Worker& worker )
     {
         char* buf = bufpool[bufsel];
         bufsel = ( bufsel + 1 ) % Pool;
-        sprintf( buf, "[%" PRIu32 "] Vsync", uint32_t( fd.name ) );
+        snprintf( buf, sizeof( bufpool[0] ), "[%" PRIu32 "] Vsync", uint32_t( fd.name ) );
         return buf;
     }
     else
