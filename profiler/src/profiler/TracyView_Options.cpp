@@ -853,7 +853,7 @@ void View::DrawOptions()
                         char buf[1024];
                         if( l.second->customName.Active() )
                         {
-                            sprintf( buf, "%" PRIu32 ": %s", l.first, m_worker.GetString( l.second->customName ) );
+                            snprintf( buf, sizeof( buf ), "%" PRIu32 ": %s", l.first, m_worker.GetString( l.second->customName ) );
                         }
                         else
                         {
