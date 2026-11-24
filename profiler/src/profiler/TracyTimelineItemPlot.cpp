@@ -39,7 +39,7 @@ const char* TimelineItemPlot::HeaderLabel() const
         }
         else
         {
-            sprintf( tmp, ICON_FA_MEMORY " %s", m_worker.GetString( m_plot->name ) );
+            snprintf( tmp, sizeof( tmp ), ICON_FA_MEMORY " %s", m_worker.GetString( m_plot->name ) );
             return tmp;
         }
     case PlotType::SysTime:
