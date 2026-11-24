@@ -7975,7 +7975,15 @@ bool Worker::UpdateSampleStatistics( uint32_t callstack, uint32_t count, bool ca
     const auto& cs = GetCallstack( callstack );
     const auto cssz = cs.size();
 
-    auto frames = (const CallstackFrameData**)alloca( cssz * sizeof( CallstackFrameData* ) );
+    // Callstack length comes from the trace: use the stack for normal sizes, the heap beyond that.
+    const CallstackFrameData* framesStack[256];
+    std::unique_ptr<const CallstackFrameData*[]> framesHeap;
+    auto frames = framesStack;
+    if( cssz > 256 )
+    {
+        framesHeap.reset( new const CallstackFrameData*[cssz] );
+        frames = framesHeap.get();
+    }
     for( uint16_t i=0; i<cssz; i++ )
     {
         auto frame = GetCallstackFrame( cs[i] );
