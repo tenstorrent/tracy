@@ -147,7 +147,7 @@ void TimelineItemGpu::HeaderExtraContents( const TimelineContext& ctx, int offse
         const auto ty = ImGui::GetTextLineHeight();
 
         char buf[64];
-        sprintf( buf, "%s context %i", GpuContextNames[(int)m_gpu->type], m_idx );
+        snprintf( buf, sizeof( buf ), "%s context %i", GpuContextNames[(int)m_gpu->type], m_idx );
         draw->AddText( ctx.wpos + ImVec2( ty * 1.5f + labelWidth, offset ), HeaderColorInactive(), buf );
     }
 }
