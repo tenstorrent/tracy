@@ -34,10 +34,9 @@ static void Launch( const char* opener, const char* url )
 
 void OpenWebpage( const char* url )
 {
-#if !defined __EMSCRIPTEN__
-    // Only web links are opened. This also stops "-option" style arguments and file:/custom schemes.
+    // Only web links are opened. This also stops "-option" style arguments and file:/custom schemes,
+    // and in the browser build keeps javascript: links out of window.open().
     if( strncmp( url, "https://", 8 ) != 0 && strncmp( url, "http://", 7 ) != 0 ) return;
-#endif
 #ifdef _WIN32
     ShellExecuteA( nullptr, nullptr, url, nullptr, nullptr, 0 );
 #elif defined __APPLE__
