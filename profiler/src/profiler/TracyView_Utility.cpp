@@ -975,7 +975,7 @@ const char* View::GetFrameText( const FrameData& fd, int i, uint64_t ftime ) con
         }
         else if( i != 1 || !m_worker.IsOnDemand() )
         {
-            sprintf( buf, "Frame %s (%s)", RealToString( fnum ), TimeToString( ftime ) );
+            snprintf( buf, sizeof( buf ), "Frame %s (%s)", RealToString( fnum ), TimeToString( ftime ) );
         }
         else
         {
