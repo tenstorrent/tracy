@@ -2656,21 +2656,18 @@ const char* Worker::GetZoneName( const GpuEvent& ev ) const
 
 static bool strstr_nocase( const char* l, const char* r )
 {
+    // No temporary lowercase copies: names come from the trace and can be arbitrarily long, so
+    // they must not be placed on the stack.
     const auto lsz = strlen( l );
     const auto rsz = strlen( r );
-    auto ll = (char*)alloca( lsz + 1 );
-    auto rl = (char*)alloca( rsz + 1 );
-    for( size_t i=0; i<lsz; i++ )
+    if( rsz > lsz ) return false;
+    for( size_t i=0; i<=lsz-rsz; i++ )
     {
-        ll[i] = tolower( l[i] );
+        size_t j = 0;
+        while( j < rsz && tolower( (unsigned char)l[i+j] ) == tolower( (unsigned char)r[j] ) ) j++;
+        if( j == rsz ) return true;
     }
-    ll[lsz] = '\0';
-    for( size_t i=0; i<rsz; i++ )
-    {
-        rl[i] = tolower( r[i] );
-    }
-    rl[rsz] = '\0';
-    return strstr( ll, rl ) != nullptr;
+    return false;
 }
 
 std::vector<int16_t> Worker::GetMatchingSourceLocation( const char* query, bool ignoreCase ) const
