@@ -1119,7 +1119,7 @@ static void DrawContents()
                 if( ImGui::IsItemHovered( ImGuiHoveredFlags_AllowWhenDisabled ) )
                 {
                     char portstr[32];
-                    sprintf( portstr, "%" PRIu16, v->port );
+                    snprintf( portstr, sizeof( portstr ), "%" PRIu16, v->port );
                     ImGui::BeginTooltip();
                     if( badProto )
                     {
