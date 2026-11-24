@@ -17,6 +17,20 @@ extern char** environ;
 namespace tracy
 {
 
+// URL schemes are case-insensitive (RFC 3986), so "HTTPS://" is as valid as "https://".
+// Written out instead of strncasecmp(), which Windows does not have.
+static bool HasPrefixNoCase( const char* s, const char* prefix )
+{
+    while( *prefix )
+    {
+        char a = *s++;
+        const char b = *prefix++;
+        if( a >= 'A' && a <= 'Z' ) a += 'a' - 'A';
+        if( a != b ) return false;
+    }
+    return true;
+}
+
 #if !defined _WIN32 && !defined __EMSCRIPTEN__
 static void Launch( const char* opener, const char* url )
 {
@@ -36,7 +50,7 @@ void OpenWebpage( const char* url )
 {
     // Only web links are opened. This also stops "-option" style arguments and file:/custom schemes,
     // and in the browser build keeps javascript: links out of window.open().
-    if( strncmp( url, "https://", 8 ) != 0 && strncmp( url, "http://", 7 ) != 0 ) return;
+    if( !HasPrefixNoCase( url, "https://" ) && !HasPrefixNoCase( url, "http://" ) ) return;
 #ifdef _WIN32
     ShellExecuteA( nullptr, nullptr, url, nullptr, nullptr, 0 );
 #elif defined __APPLE__
