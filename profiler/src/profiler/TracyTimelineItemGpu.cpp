@@ -34,7 +34,7 @@ const char* TimelineItemGpu::HeaderLabel() const
     static char buf[4096];
     if( m_gpu->name.Active() )
     {
-        sprintf( buf, "%s", m_worker.GetString( m_gpu->name ) );
+        snprintf( buf, sizeof( buf ), "%s", m_worker.GetString( m_gpu->name ) );
     }
     else
     {
