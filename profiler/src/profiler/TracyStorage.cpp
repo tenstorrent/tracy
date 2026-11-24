@@ -277,7 +277,7 @@ const char* GetSavePathLegacy( const char* program, uint64_t time, const char* f
     NormalizeProgramName( tmp, tsz );
 
     // 604800 = 7 days
-    sz += sprintf( buf+sz, "/tracy/user/%c/%s/%" PRIu64 "/%" PRIu64 "/", tmp[0], tmp, uint64_t( time / 604800 ), time );
+    sz = Advance( sz, MaxPath, snprintf( buf+sz, MaxPath - sz, "/tracy/user/%c/%s/%" PRIu64 "/%" PRIu64 "/", tmp[0], tmp, uint64_t( time / 604800 ), time ) );
 
     if( file )
     {
