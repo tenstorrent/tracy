@@ -45,7 +45,7 @@ const char* TimelineItemPlot::HeaderLabel() const
     case PlotType::SysTime:
         return ICON_FA_GAUGE_HIGH " CPU usage";
     case PlotType::Power:
-        sprintf( tmp, ICON_FA_BOLT " %s", m_worker.GetString( m_plot->name ) );
+        snprintf( tmp, sizeof( tmp ), ICON_FA_BOLT " %s", m_worker.GetString( m_plot->name ) );
         return tmp;
     default:
         assert( false );
