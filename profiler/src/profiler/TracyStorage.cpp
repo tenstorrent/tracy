@@ -206,6 +206,14 @@ static void NormalizeProgramName( char* buf, size_t sz )
     }
 }
 
+// Moves the write position past what snprintf() produced, never beyond the last byte before the
+// terminator, so a truncated result cannot push later writes out of the buffer.
+static size_t Advance( size_t sz, size_t cap, int n )
+{
+    if( n < 0 ) return sz;
+    return std::min( sz + size_t( n ), cap - 1 );
+}
+
 const char* GetSavePath( const char* program, uint64_t time, bool create )
 {
     assert( program && *program );
@@ -225,7 +233,7 @@ const char* GetSavePath( const char* program, uint64_t time, bool create )
     char tmp[512];
     const auto tsz = strzcpy( tmp, program, sizeof( tmp ) );
     NormalizeProgramName( tmp, tsz );
-    sz += sprintf( buf+sz, "/tracy/sidecar/%s", tmp );
+    sz = Advance( sz, MaxPath, snprintf( buf+sz, MaxPath - sz, "/tracy/sidecar/%s", tmp ) );
 
     if( create )
     {
