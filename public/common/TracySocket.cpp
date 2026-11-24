@@ -177,7 +177,7 @@ bool Socket::Connect( const char* addr, uint16_t port )
     hints.ai_socktype = SOCK_STREAM;
 
     char portbuf[32];
-    sprintf( portbuf, "%" PRIu16, port );
+    snprintf( portbuf, sizeof( portbuf ), "%" PRIu16, port );
 
     if( getaddrinfo( addr, portbuf, &hints, &res ) != 0 ) return false;
     int sock = 0;
@@ -441,7 +441,7 @@ static int addrinfo_and_socket_for_family( uint16_t port, int ai_family, struct 
     }
 #endif
     char portbuf[32];
-    sprintf( portbuf, "%" PRIu16, port );
+    snprintf( portbuf, sizeof( portbuf ), "%" PRIu16, port );
     if( getaddrinfo( nullptr, portbuf, &hints, res ) != 0 ) return -1;
     int sock = socket( (*res)->ai_family, (*res)->ai_socktype, (*res)->ai_protocol );
     if (sock == -1) freeaddrinfo( *res );
@@ -553,7 +553,7 @@ bool UdpBroadcast::Open( const char* addr, uint16_t port )
     hints.ai_socktype = SOCK_DGRAM;
 
     char portbuf[32];
-    sprintf( portbuf, "%" PRIu16, port );
+    snprintf( portbuf, sizeof( portbuf ), "%" PRIu16, port );
 
     if( getaddrinfo( addr, portbuf, &hints, &res ) != 0 ) return false;
     int sock = 0;
